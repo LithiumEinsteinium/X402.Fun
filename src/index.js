@@ -27,6 +27,7 @@ app.get('/health', (req, res) => {
 import agents from './api/agents.js';
 import tokens from './api/tokens.js';
 import x402 from './api/x402.js';
+import pumpswap from './api/pumpswap.js';
 
 app.post('/api/agents/register', agents.registerAgent);
 app.get('/api/agents/:id', agents.getAgent);
@@ -44,6 +45,11 @@ app.get('/api/x402/price', x402.getPrice);
 app.post('/api/x402/verify', x402.verifyPayment);
 app.post('/api/x402/create', x402.createPaymentRequest);
 app.post('/api/x402/webhook', x402.paymentWebhook);
+
+app.post('/api/pumpswap/quote', pumpswap.getQuote);
+app.post('/api/pumpswap/swap', pumpswap.executeSwap);
+app.get('/api/pumpswap/price/:mint', pumpswap.getPrice);
+app.get('/api/pumpswap/pool/:mint', pumpswap.getPoolInfo);
 
 // Error handler
 app.use((err, req, res, next) => {
