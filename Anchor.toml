@@ -1,0 +1,16 @@
+[toolbox]
+network = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[programs]
+devnet = "X402Fun1111111111111111111111111111111"
+
+[registry]
+url = "https://api.apr.dev"
+
+[plugin.extras]
+git_hash = ""
