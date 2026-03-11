@@ -1,7 +1,9 @@
 /**
- * X402.Fun - Smart Contract (Simplified)
+ * X402.Fun - Smart Contract v2
  * 
  * Agent-only meme token launchpad with bonding curve
+ * x402 required for: launch, buy, sell (during bonding curve)
+ * Graduation at 69 SOL liquidity (multi-agent pool)
  */
 
 use anchor_lang::prelude::*;
@@ -11,9 +13,9 @@ use core::mem::size_of;
 declare_id!("X402Fun1111111111111111111111111111111");
 
 pub mod constants {
-    pub const GRADUATION_MARKET_CAP: u64 = 12_000_000_000;
-    pub const PLATFORM_FEE_BPS: u16 = 100;
-    pub const CREATOR_FEE_BPS: u16 = 200;
+    pub const GRADUATION_LIQUIDITY_SOL: u64 = 69_000_000_000; // 69 SOL in lamports
+    pub const PLATFORM_FEE_BPS: u16 = 100; // 1%
+    pub const CREATOR_FEE_BPS: u16 = 200; // 2%
 }
 
 #[program]
@@ -27,11 +29,12 @@ pub mod x402_fun {
         global.initialized = true;
         global.token_count = 0;
         global.virtual_token_reserves = 1_073_000_000_000_000;
-        global.virtual_sol_reserves = 30_000_000_000;
+        global.virtual_sol_reserves = 30_000_000_000; // 30 SOL initial
         global.real_token_reserves = 793_100_000_000_000;
         Ok(())
     }
 
+    /// Launch token - requires x402 payment
     pub fn launch_token(
         ctx: Context<LaunchToken>,
         name: String,
@@ -55,6 +58,7 @@ pub mod x402_fun {
         token.completed = false;
         token.total_buys = 0;
         token.total_sells = 0;
+        token.liquidity_contributed = 0;
         
         let curve = &mut ctx.accounts.bonding_curve;
         curve.mint = ctx.accounts.mint.key();
@@ -65,18 +69,27 @@ pub mod x402_fun {
         curve.token_total_supply = 1_000_000_000_000_000;
         curve.complete = false;
 
+        emit!(LaunchEvent {
+            mint: token.mint,
+            creator: token.creator,
+            name: token.name.clone(),
+            symbol: token.symbol.clone(),
+        });
+
         Ok(())
     }
 
+    /// Buy on bonding curve - requires x402 during bonding phase
     pub fn buy(
         ctx: Context<Buy>,
         amount: u64,
         x402_payment_verified: bool,
     ) -> Result<()> {
-        // x402 payment required during bonding curve phase
+        // x402 required during bonding curve phase
+        require!(!ctx.accounts.bonding_curve.complete, X402Error::AlreadyGraduated);
         require!(x402_payment_verified, X402Error::PaymentRequired);
+
         let curve = &mut ctx.accounts.bonding_curve;
-        require!(!curve.complete, X402Error::TokenGraduated);
 
         let tokens_out = (amount * curve.virtual_token_reserves) 
             / (curve.virtual_sol_reserves + amount);
@@ -85,6 +98,7 @@ pub mod x402_fun {
         let creator_fee = (amount * constants::CREATOR_FEE_BPS as u64) / 10000;
         let net_sol = amount - platform_fee - creator_fee;
 
+        // Transfer SOL to bonding curve
         let transfer_ix = anchor_lang::solana_program::system_instruction::transfer(
             &ctx.accounts.buyer.key(),
             &ctx.accounts.bonding_curve.key(),
@@ -98,34 +112,36 @@ pub mod x402_fun {
             ],
         )?;
 
+        // Update curve state
         curve.virtual_sol_reserves += amount;
         curve.virtual_token_reserves -= tokens_out;
+        curve.real_sol_reserves += net_sol;
 
-        let market_cap = calculate_market_cap(curve);
-        if market_cap >= constants::GRADUATION_MARKET_CAP {
-            curve.complete = true;
-        }
+        let token = &mut ctx.accounts.token;
+        token.total_buys += 1;
 
         emit!(BuyEvent {
             mint: curve.mint,
             buyer: ctx.accounts.buyer.key(),
             sol_amount: amount,
             tokens_received: tokens_out,
-            market_cap,
+            liquidity: curve.real_sol_reserves,
         });
 
         Ok(())
     }
 
+    /// Sell on bonding curve - requires x402 during bonding phase
     pub fn sell(
         ctx: Context<Sell>,
         token_amount: u64,
         x402_payment_verified: bool,
     ) -> Result<()> {
-        // x402 payment required during bonding curve phase
+        // x402 required during bonding curve phase
+        require!(!ctx.accounts.bonding_curve.complete, X402Error::AlreadyGraduated);
         require!(x402_payment_verified, X402Error::PaymentRequired);
+
         let curve = &mut ctx.accounts.bonding_curve;
-        require!(!curve.complete, X402Error::TokenGraduated);
 
         let sol_out = (token_amount * curve.virtual_sol_reserves)
             / (curve.virtual_token_reserves + token_amount);
@@ -134,11 +150,17 @@ pub mod x402_fun {
         let creator_fee = (sol_out * constants::CREATOR_FEE_BPS as u64) / 10000;
         let net_sol = sol_out - platform_fee - creator_fee;
 
+        // Transfer SOL to seller
         **ctx.accounts.seller.try_borrow_mut_lamports()? += net_sol;
         **ctx.accounts.bonding_curve.try_borrow_mut_lamports()? -= net_sol;
 
+        // Update curve state
         curve.virtual_sol_reserves -= sol_out;
         curve.virtual_token_reserves += token_amount;
+        curve.real_sol_reserves -= sol_out;
+
+        let token = &mut ctx.accounts.token;
+        token.total_sells += 1;
 
         emit!(SellEvent {
             mint: curve.mint,
@@ -149,11 +171,58 @@ pub mod x402_fun {
 
         Ok(())
     }
-}
 
-fn calculate_market_cap(curve: &BondingCurve) -> u64 {
-    let price = (curve.virtual_sol_reserves as f64) / (curve.virtual_token_reserves as f64);
-    (curve.token_total_supply as f64 * price * 100.0) as u64
+    /// Contribute liquidity for graduation - multiple agents can contribute
+    pub fn contribute_liquidity(
+        ctx: Context<ContributeLiquidity>,
+        amount: u64,
+    ) -> Result<()> {
+        let curve = &mut ctx.accounts.bonding_curve;
+        let token = &mut ctx.accounts.token;
+        
+        // Can't contribute if already graduated
+        require!(!curve.complete, X402Error::AlreadyGraduated);
+
+        // Transfer SOL from contributor to bonding curve
+        let transfer_ix = anchor_lang::solana_program::system_instruction::transfer(
+            &ctx.accounts.contributor.key(),
+            &ctx.accounts.bonding_curve.key(),
+            amount,
+        );
+        anchor_lang::solana_program::program::invoke(
+            &transfer_ix,
+            &[
+                ctx.accounts.contributor.to_account_info(),
+                ctx.accounts.bonding_curve.to_account_info(),
+            ],
+        )?;
+
+        // Update liquidity
+        curve.real_sol_reserves += amount;
+        token.liquidity_contributed += amount;
+
+        // Check if reached graduation threshold
+        if curve.real_sol_reserves >= constants::GRADUATION_LIQUIDITY_SOL {
+            curve.complete = true;
+            token.graduated = true;
+            
+            emit!(GraduationEvent {
+                mint: curve.mint,
+                total_liquidity: curve.real_sol_reserves,
+            });
+        }
+
+        emit!(LiquidityContributionEvent {
+            mint: curve.mint,
+            contributor: ctx.accounts.contributor.key(),
+            amount,
+            total_liquidity: curve.real_sol_reserves,
+            target: constants::GRADUATION_LIQUIDITY_SOL,
+            percent: (curve.real_sol_reserves * 100) / constants::GRADUATION_LIQUIDITY_SOL,
+        });
+
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -205,7 +274,6 @@ pub struct LaunchToken<'info> {
     #[account(mut)]
     pub creator: Signer<'info>,
     pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, token::Token>,
     pub rent: Sysvar<'info, Rent>,
 }
 
@@ -213,7 +281,7 @@ pub struct LaunchToken<'info> {
 pub struct Buy<'info> {
     #[account(mut)]
     pub global: Account<'info, Global>,
-    #[account(mut)]
+    #[account(mut, seeds = [b"token", bonding_curve.mint.as_ref()], bump)]
     pub token: Account<'info, TokenState>,
     #[account(
         mut,
@@ -228,7 +296,7 @@ pub struct Buy<'info> {
 
 #[derive(Accounts)]
 pub struct Sell<'info> {
-    #[account(mut)]
+    #[account(mut, seeds = [b"token", bonding_curve.mint.as_ref()], bump)]
     pub token: Account<'info, TokenState>,
     #[account(
         mut,
@@ -238,6 +306,21 @@ pub struct Sell<'info> {
     pub bonding_curve: Account<'info, BondingCurve>,
     #[account(mut)]
     pub seller: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ContributeLiquidity<'info> {
+    #[account(mut, seeds = [b"token", bonding_curve.mint.as_ref()], bump)]
+    pub token: Account<'info, TokenState>,
+    #[account(
+        mut,
+        seeds = [b"curve", bonding_curve.mint.as_ref()],
+        bump
+    )]
+    pub bonding_curve: Account<'info, BondingCurve>,
+    #[account(mut)]
+    pub contributor: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -264,6 +347,7 @@ pub struct TokenState {
     pub completed: bool,
     pub total_buys: u64,
     pub total_sells: u64,
+    pub liquidity_contributed: u64,
 }
 
 #[account]
@@ -278,12 +362,20 @@ pub struct BondingCurve {
 }
 
 #[event]
+pub struct LaunchEvent {
+    pub mint: Pubkey,
+    pub creator: Pubkey,
+    pub name: String,
+    pub symbol: String,
+}
+
+#[event]
 pub struct BuyEvent {
     pub mint: Pubkey,
     pub buyer: Pubkey,
     pub sol_amount: u64,
     pub tokens_received: u64,
-    pub market_cap: u64,
+    pub liquidity: u64,
 }
 
 #[event]
@@ -294,10 +386,26 @@ pub struct SellEvent {
     pub sol_received: u64,
 }
 
+#[event]
+pub struct LiquidityContributionEvent {
+    pub mint: Pubkey,
+    pub contributor: Pubkey,
+    pub amount: u64,
+    pub total_liquidity: u64,
+    pub target: u64,
+    pub percent: u64,
+}
+
+#[event]
+pub struct GraduationEvent {
+    pub mint: Pubkey,
+    pub total_liquidity: u64,
+}
+
 #[error_code]
 pub enum X402Error {
     #[msg("x402 payment required")]
     PaymentRequired,
-    #[msg("Token has already graduated")]
-    TokenGraduated,
+    #[msg("Token has already graduated - public trading open")]
+    AlreadyGraduated,
 }
