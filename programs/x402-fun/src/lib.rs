@@ -5,8 +5,8 @@
  */
 
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Mint, TokenAccount, Transfer};
-use anchor_spl::associated_token::AssociatedToken;
+use anchor_spl::token::Mint;
+use core::mem::size_of;
 
 declare_id!("X402Fun1111111111111111111111111111111");
 
@@ -71,7 +71,10 @@ pub mod x402_fun {
     pub fn buy(
         ctx: Context<Buy>,
         amount: u64,
+        x402_payment_verified: bool,
     ) -> Result<()> {
+        // x402 payment required during bonding curve phase
+        require!(x402_payment_verified, X402Error::PaymentRequired);
         let curve = &mut ctx.accounts.bonding_curve;
         require!(!curve.complete, X402Error::TokenGraduated);
 
@@ -117,7 +120,10 @@ pub mod x402_fun {
     pub fn sell(
         ctx: Context<Sell>,
         token_amount: u64,
+        x402_payment_verified: bool,
     ) -> Result<()> {
+        // x402 payment required during bonding curve phase
+        require!(x402_payment_verified, X402Error::PaymentRequired);
         let curve = &mut ctx.accounts.bonding_curve;
         require!(!curve.complete, X402Error::TokenGraduated);
 
