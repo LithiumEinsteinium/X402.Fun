@@ -4,7 +4,8 @@
  * Handle payments for token launches and API usage
  */
 
-import { Request, Response } from 'express';
+import pkg from 'express';
+const { Request, Response } = pkg;
 
 // In production, this would verify x402 payment headers
 // and handle USDC settlements
