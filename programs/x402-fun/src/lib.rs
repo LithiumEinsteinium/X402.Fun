@@ -105,16 +105,17 @@ pub mod x402_fun {
         );
         require!(x402_payment_verified, X402Error::PaymentRequired);
 
-        let curve = &mut ctx.accounts.bonding_curve;
-
-        let tokens_out = (amount * curve.virtual_token_reserves)
-            / (curve.virtual_sol_reserves + amount);
-
+        // Snapshot everything we need from curve BEFORE taking the mutable borrow,
+        // so the CPI account_info calls don't conflict with `curve`.
+        let tokens_out = {
+            let c = &ctx.accounts.bonding_curve;
+            (amount * c.virtual_token_reserves) / (c.virtual_sol_reserves + amount)
+        };
         let platform_fee = (amount * constants::PLATFORM_FEE_BPS as u64) / 10000;
         let creator_fee = (amount * constants::CREATOR_FEE_BPS as u64) / 10000;
         let net_sol = amount - platform_fee - creator_fee;
 
-        // Transfer SOL to bonding curve via CPI
+        // Transfer SOL to bonding curve via CPI — no mutable borrow of curve held here
         let transfer_ix = anchor_lang::solana_program::system_instruction::transfer(
             &ctx.accounts.buyer.key(),
             &ctx.accounts.bonding_curve.key(),
@@ -129,17 +130,17 @@ pub mod x402_fun {
             ],
         )?;
 
-        // Update curve state
+        // Now take the mutable borrow and update state
+        let curve = &mut ctx.accounts.bonding_curve;
         curve.virtual_sol_reserves += amount;
         curve.virtual_token_reserves -= tokens_out;
         curve.real_sol_reserves += net_sol;
 
-        let token = &mut ctx.accounts.token;
-        token.total_buys += 1;
-
-        // Re-read after mutable borrow ends
         let mint = curve.mint;
         let real_sol_reserves = curve.real_sol_reserves;
+
+        let token = &mut ctx.accounts.token;
+        token.total_buys += 1;
 
         emit!(BuyEvent {
             mint,
@@ -165,17 +166,17 @@ pub mod x402_fun {
         );
         require!(x402_payment_verified, X402Error::PaymentRequired);
 
-        let curve = &mut ctx.accounts.bonding_curve;
+        // Snapshot computed values before any borrows
+        let (sol_out, net_sol) = {
+            let c = &ctx.accounts.bonding_curve;
+            let sol_out = (token_amount * c.virtual_sol_reserves)
+                / (c.virtual_token_reserves + token_amount);
+            let platform_fee = (sol_out * constants::PLATFORM_FEE_BPS as u64) / 10000;
+            let creator_fee = (sol_out * constants::CREATOR_FEE_BPS as u64) / 10000;
+            (sol_out, sol_out - platform_fee - creator_fee)
+        };
 
-        let sol_out = (token_amount * curve.virtual_sol_reserves)
-            / (curve.virtual_token_reserves + token_amount);
-
-        let platform_fee = (sol_out * constants::PLATFORM_FEE_BPS as u64) / 10000;
-        let creator_fee = (sol_out * constants::CREATOR_FEE_BPS as u64) / 10000;
-        let net_sol = sol_out - platform_fee - creator_fee;
-
-        // FIX: Account<'_, T> doesn't expose try_borrow_mut_lamports directly.
-        // Use to_account_info() to get the underlying AccountInfo, which does.
+        // Lamport transfer — use account_info directly, no mutable curve borrow held
         {
             let curve_info = ctx.accounts.bonding_curve.to_account_info();
             let seller_info = ctx.accounts.seller.to_account_info();
@@ -183,15 +184,16 @@ pub mod x402_fun {
             **seller_info.try_borrow_mut_lamports()? += net_sol;
         }
 
-        // Update curve state
+        // Now safe to mutably borrow and update state
+        let curve = &mut ctx.accounts.bonding_curve;
         curve.virtual_sol_reserves -= sol_out;
         curve.virtual_token_reserves += token_amount;
         curve.real_sol_reserves -= sol_out;
 
+        let mint = curve.mint;
+
         let token = &mut ctx.accounts.token;
         token.total_sells += 1;
-
-        let mint = curve.mint;
 
         emit!(SellEvent {
             mint,
