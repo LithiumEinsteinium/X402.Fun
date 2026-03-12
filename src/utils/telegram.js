@@ -1,16 +1,16 @@
 /**
- * X402.Fun - Telegram Bot
+ * X402.Fun - Telegram Bot (ESM)
  * 
  * Announces: New token launches, graduations, price alerts
- * No trading through bot
  */
 
-const TelegramBot = require('node-telegram-bot-api');
+import TelegramBotPkg from 'node-telegram-bot-api';
 
+const TelegramBot = TelegramBotPkg;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHANNEL = process.env.TELEGRAM_CHANNEL || process.env.TELEGRAM_ANNOUNCEMENT_CHANNEL;
 
-// Bot instance (won't work until token is set)
+// Bot instance
 let bot = null;
 if (TELEGRAM_BOT_TOKEN && TELEGRAM_BOT_TOKEN !== 'YOUR_BOT_TOKEN_HERE') {
   try {
@@ -21,12 +21,9 @@ if (TELEGRAM_BOT_TOKEN && TELEGRAM_BOT_TOKEN !== 'YOUR_BOT_TOKEN_HERE') {
   }
 }
 
-/**
- * Announce new token launch
- */
-async function announceLaunch(token) {
+export async function announceLaunch(token) {
   if (!bot || !TELEGRAM_CHANNEL) {
-    console.log('📢 Would announce launch:', token.name);
+    console.log('📢 Would announce launch:', token?.name);
     return;
   }
   
@@ -48,12 +45,9 @@ Start trading via MCP!
   }
 }
 
-/**
- * Announce token graduation
- */
-async function announceGraduation(token) {
+export async function announceGraduation(token) {
   if (!bot || !TELEGRAM_CHANNEL) {
-    console.log('📢 Would announce graduation:', token.name);
+    console.log('📢 Would announce graduation:', token?.name);
     return;
   }
   
@@ -75,10 +69,7 @@ Public trading now open! 🚀
   }
 }
 
-/**
- * Announce liquidity milestone
- */
-async function announceMilestone(token, milestone) {
+export async function announceMilestone(token, milestone) {
   if (!bot || !TELEGRAM_CHANNEL) {
     console.log('📢 Would announce milestone:', milestone);
     return;
@@ -100,48 +91,3 @@ ${milestone.message || 'Keep climbing! 🚀'}
     console.log('❌ Failed to announce:', e.message);
   }
 }
-
-// Handle incoming messages (for owner only)
-if (bot) {
-  bot.on('message', async (msg) => {
-    const chatId = msg.chat.id;
-    const text = msg.text;
-    
-    if (text === '/start') {
-      await bot.sendMessage(chatId, `
-🤖 *X402.Fun Bot*
-
-I announce:
-• New token launches
-• Token graduations  
-• Liquidity milestones
-
-No trading through bot - use MCP for that!
-
-🔗 *API:* https://x402-fun.onrender.com
-      `.trim(), { parse_mode: 'Markdown' });
-    }
-    
-    if (text === '/stats') {
-      await bot.sendMessage(chatId, '📊 Check the API for stats!');
-    }
-    
-    if (text === '/help') {
-      await bot.sendMessage(chatId, `
-*Commands:*
-/start - Welcome message
-/stats - View stats
-/help - This help message
-
-*Links:*
-API: https://x402-fun.onrender.com
-      `.trim(), { parse_mode: 'Markdown' });
-    }
-  });
-}
-
-module.exports = {
-  announceLaunch,
-  announceGraduation,
-  announceMilestone
-};
