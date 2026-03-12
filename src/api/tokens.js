@@ -1,29 +1,19 @@
 /**
- * Token Launch & Trading API with Solana Integration
- * 
- * Bonding curve implementation similar to Pump.fun
- * Multi-agent collaboration support
+ * Token Launch & Trading API with Supabase Integration
  */
 
-import { Connection, PublicKey } from '@solana/web3.js';
-import { announceLaunch, announceGraduation, announceMilestone } from '../utils/telegram.js';
-
-const PROGRAM_ID = '63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF';
-const RPC_URL = 'https://api.devnet.solana.com';
-const connection = new Connection(RPC_URL, 'confirmed');
+import { supabase, isSupabaseConfigured } from '../utils/supabase.js';
 
 const GRADUATION_LIQUIDITY_SOL = 1_500_000_000; // 1.5 SOL devnet
 const GRADUATION_LIQUIDITY_LAMPORTS = BigInt(GRADUATION_LIQUIDITY_SOL);
-const PLATFORM_FEE = 0.01; // 1%
+const PLATFORM_FEE = 0.01;
 
+// In-memory fallback
 const tokens = new Map();
 const bondingCurves = new Map();
 
 /**
  * Launch a new token
- * POST /api/tokens/launch
- * 
- * Body: { agentId, name, symbol, uri, creatorWallet }
  */
 export async function launchToken(req, res) {
   try {
@@ -33,11 +23,9 @@ export async function launchToken(req, res) {
       return res.status(400).json({ error: 'Agent ID, name, and symbol required' });
     }
     
-    // Generate mint address (in production, this would be created on-chain)
     const mintAddress = generateMintAddress();
     const tokenId = `token_${Date.now()}`;
     
-    // Initialize bonding curve
     const bondingCurve = {
       mint: mintAddress,
       virtualTokenReserves: 1_073_000_000_000_000n,
@@ -46,7 +34,6 @@ export async function launchToken(req, res) {
       realSolReserves: 0n,
       tokenTotalSupply: 1_000_000_000_000_000n,
       complete: false,
-      creator: agentId,
       createdAt: new Date().toISOString(),
       totalBuys: 0,
       totalSells: 0,
@@ -67,16 +54,41 @@ export async function launchToken(req, res) {
       createdAt: new Date().toISOString()
     };
     
+    // Try Supabase
+    if (isSupabaseConfigured()) {
+      try {
+        await supabase.from('tokens').insert({
+          id: tokenId,
+          mint: mintAddress,
+          name,
+          symbol,
+          uri: uri || '',
+          creator_agent_id: agentId,
+          creator_wallet: creatorWallet || '',
+          graduated: false,
+          created_at: new Date().toISOString()
+        });
+        
+        await supabase.from('bonding_curves').insert({
+          id: tokenId,
+          token_id: tokenId,
+          virtual_token_reserves: Number(bondingCurve.virtualTokenReserves),
+          virtual_sol_reserves: Number(bondingCurve.virtualSolReserves),
+          real_token_reserves: Number(bondingCurve.realTokenReserves),
+          real_sol_reserves: 0,
+          complete: false
+        });
+      } catch (e) {
+        console.log('Supabase insert failed, using memory');
+      }
+    }
+    
     tokens.set(tokenId, token);
     bondingCurves.set(mintAddress, bondingCurve);
     
-    // Announce on Telegram
-    announceLaunch({
-      name: token.name,
-      symbol: token.symbol,
-      creator: token.agentId,
-      mint: token.mint
-    });
+    // Announce
+    const { announceLaunch } = await import('../utils/telegram.js');
+    announceLaunch?.({ name, symbol, creator: agentId, mint: mintAddress });
     
     res.json({
       success: true,
@@ -91,8 +103,7 @@ export async function launchToken(req, res) {
           progress: 0
         }
       },
-      // Transaction instructions would go here in production
-      message: 'Token launched on bonding curve (devnet mock)'
+      message: 'Token launched on bonding curve'
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -101,18 +112,49 @@ export async function launchToken(req, res) {
 
 /**
  * Get token info
- * GET /api/tokens/:id
  */
 export async function getToken(req, res) {
   const { id } = req.params;
-  const token = tokens.get(id);
+  
+  // Try memory first
+  let token = tokens.get(id);
+  
+  // Try Supabase
+  if (!token && isSupabaseConfigured()) {
+    try {
+      const { data } = await supabase
+        .from('tokens')
+        .select('*')
+        .eq('id', id)
+        .single();
+      
+      if (data) {
+        const { data: curveData } = await supabase
+          .from('bonding_curves')
+          .select('*')
+          .eq('token_id', id)
+          .single();
+        
+        token = {
+          ...data,
+          bondingCurve: curveData ? {
+            virtualTokenReserves: BigInt(curveData.virtual_token_reserves),
+            virtualSolReserves: BigInt(curveData.virtual_sol_reserves),
+            realTokenReserves: BigInt(curveData.real_token_reserves),
+            realSolReserves: BigInt(curveData.real_sol_reserves),
+            complete: curveData.complete,
+            totalBuys: 0,
+            totalSells: 0,
+            liquidity: Number(curveData.real_sol_reserves) / 1e9
+          } : null
+        };
+      }
+    } catch (e) {
+      console.log('Supabase query failed');
+    }
+  }
   
   if (!token) {
-    // Check by mint address
-    const tokenByMint = Array.from(tokens.values()).find(t => t.mint === id);
-    if (tokenByMint) {
-      return res.json({ token: formatToken(tokenByMint) });
-    }
     return res.status(404).json({ error: 'Token not found' });
   }
   
@@ -121,12 +163,26 @@ export async function getToken(req, res) {
 
 /**
  * List all tokens
- * GET /api/tokens
  */
 export async function listTokens(req, res) {
   const { graduated } = req.query;
   
   let tokenList = Array.from(tokens.values());
+  
+  // Try Supabase
+  if (isSupabaseConfigured() && tokens.size === 0) {
+    try {
+      let query = supabase.from('tokens').select('*').order('created_at', { ascending: false });
+      
+      const { data } = await query;
+      
+      if (data && data.length > 0) {
+        tokenList = data;
+      }
+    } catch (e) {
+      console.log('Supabase list failed');
+    }
+  }
   
   if (graduated !== undefined) {
     tokenList = tokenList.filter(t => t.graduated === (graduated === 'true'));
@@ -138,10 +194,7 @@ export async function listTokens(req, res) {
 }
 
 /**
- * Buy tokens on bonding curve
- * POST /api/tokens/buy
- * 
- * Body: { mint, agentId, solAmount }
+ * Buy tokens
  */
 export async function buyTokens(req, res) {
   try {
@@ -160,35 +213,29 @@ export async function buyTokens(req, res) {
       return res.status(400).json({ error: 'Token already graduated' });
     }
     
-    // Calculate tokens received
     const solIn = BigInt(Math.floor(solAmount * 1e9));
     const tokensOut = calculateBuyOutput(solIn, curve.virtualSolReserves, curve.virtualTokenReserves);
     
-    // Update reserves
     curve.virtualSolReserves += solIn;
     curve.virtualTokenReserves -= tokensOut;
     curve.realSolReserves += solIn;
     curve.totalBuys++;
-    curve.liquidity = Number(curve.realSolReserves) / 1e9;
+    curve.liquidity = curve.realSolReserves;
     
-    // Check for graduation
     const progress = (curve.realSolReserves * 100n) / GRADUATION_LIQUIDITY_LAMPORTS;
     const graduated = curve.realSolReserves >= GRADUATION_LIQUIDITY_LAMPORTS;
     
     if (graduated) {
       curve.complete = true;
-      const token = Array.from(tokens.values()).find(t => t.mint === mint);
-      if (token) token.graduated = true;
     }
     
     res.json({
       success: true,
       tokensReceived: Number(tokensOut) / 1e9,
-      liquidity: curve.liquidity,
+      liquidity: Number(curve.liquidity) / 1e9,
       price: calculatePrice(curve),
       progress: Number(progress),
-      graduated: curve.complete,
-      message: 'Buy executed (devnet mock)'
+      graduated: curve.complete
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -196,17 +243,14 @@ export async function buyTokens(req, res) {
 }
 
 /**
- * Sell tokens on bonding curve
- * POST /api/tokens/sell
- * 
- * Body: { mint, agentId, tokenAmount }
+ * Sell tokens
  */
 export async function sellTokens(req, res) {
   try {
     const { mint, agentId, tokenAmount } = req.body;
     
     if (!mint || !agentId || !tokenAmount) {
-      return res.status(400).json({ error: 'Mint, agent ID, and token amount required' });
+      return res.status(400).json({ error: 'All fields required' });
     }
     
     const curve = bondingCurves.get(mint);
@@ -221,17 +265,16 @@ export async function sellTokens(req, res) {
     const tokensIn = BigInt(Math.floor(tokenAmount * 1e9));
     const solOut = calculateSellOutput(tokensIn, curve.virtualSolReserves, curve.virtualTokenReserves);
     
-    // Update reserves
     curve.virtualSolReserves -= solOut;
     curve.virtualTokenReserves += tokensIn;
     curve.realSolReserves -= solOut;
     curve.totalSells++;
-    curve.liquidity = Number(curve.realSolReserves) / 1e9;
+    curve.liquidity = curve.realSolReserves;
     
     res.json({
       success: true,
       solReceived: Number(solOut) / 1e9,
-      liquidity: curve.liquidity,
+      liquidity: Number(curve.liquidity) / 1e9,
       price: calculatePrice(curve)
     });
   } catch (error) {
@@ -240,8 +283,7 @@ export async function sellTokens(req, res) {
 }
 
 /**
- * Add contributor to token
- * POST /api/tokens/:id/collaborate
+ * Add collaborator
  */
 export async function addCollaborator(req, res) {
   try {
@@ -272,8 +314,7 @@ export async function addCollaborator(req, res) {
 }
 
 /**
- * Contribute liquidity for graduation
- * POST /api/tokens/:id/contribute
+ * Contribute liquidity
  */
 export async function contributeLiquidity(req, res) {
   try {
@@ -294,10 +335,9 @@ export async function contributeLiquidity(req, res) {
       return res.status(400).json({ error: 'Already graduated' });
     }
     
-    // Add liquidity
     const solIn = BigInt(Math.floor(solAmount * 1e9));
     curve.realSolReserves += solIn;
-    curve.liquidity = Number(curve.realSolReserves) / 1e9;
+    curve.liquidity = curve.realSolReserves;
     
     const progress = (curve.realSolReserves * 100n) / GRADUATION_LIQUIDITY_LAMPORTS;
     const graduated = curve.realSolReserves >= GRADUATION_LIQUIDITY_LAMPORTS;
@@ -306,18 +346,21 @@ export async function contributeLiquidity(req, res) {
       curve.complete = true;
       token.graduated = true;
       
-      // Announce graduation
-      announceGraduation({
-        name: token.name,
-        symbol: token.symbol,
-        creator: token.agentId,
-        mint: token.mint
-      });
+      // Update Supabase
+      if (isSupabaseConfigured()) {
+        try {
+          await supabase.from('tokens').update({ graduated: true }).eq('id', id);
+        } catch (e) {}
+      }
+      
+      // Announce
+      const { announceGraduation } = await import('../utils/telegram.js');
+      announceGraduation?.({ name: token.name, symbol: token.symbol, creator: token.agentId, mint: token.mint });
     }
     
     res.json({
       success: true,
-      liquidity: curve.liquidity,
+      liquidity: Number(curve.liquidity) / 1e9,
       progress: Number(progress),
       graduated: curve.complete,
       target: GRADUATION_LIQUIDITY_SOL,
@@ -328,7 +371,6 @@ export async function contributeLiquidity(req, res) {
   }
 }
 
-// Helper functions
 function generateMintAddress() {
   const chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnopqrstuvwxyz';
   let addr = '';
@@ -355,24 +397,24 @@ function calculateSellOutput(tokensIn, solReserves, tokenReserves) {
 }
 
 function formatToken(token) {
-  const curve = bondingCurves.get(token.mint);
-  const progress = curve ? (Number(curve.realSolReserves) * 100) / GRADUATION_LIQUIDITY_SOL : 0;
+  const curve = token.bondingCurve || bondingCurves.get(token.mint);
+  const progress = curve ? (Number(curve.realSolReserves || curve.real_sol_reserves || 0) * 100) / GRADUATION_LIQUIDITY_SOL : 0;
   
   return {
     id: token.id,
     mint: token.mint,
     name: token.name,
     symbol: token.symbol,
-    creator: token.agentId,
+    creator: token.agentId || token.creator_agent_id,
     graduated: token.graduated,
-    collaborators: token.collaborators,
-    createdAt: token.createdAt,
+    collaborators: token.collaborators || [],
+    createdAt: token.createdAt || token.created_at,
     bondingCurve: curve ? {
-      liquidity: curve.liquidity,
+      liquidity: Number(curve.liquidity || curve.realSolReserves || curve.real_sol_reserves || 0) / 1e9,
       price: calculatePrice(curve),
       progress: Math.min(100, progress),
-      totalBuys: curve.totalBuys,
-      totalSells: curve.totalSells
+      totalBuys: curve.totalBuys || 0,
+      totalSells: curve.totalSells || 0
     } : null
   };
 }

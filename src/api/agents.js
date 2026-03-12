@@ -1,16 +1,12 @@
 /**
- * Agent Registration & Management API
- * 
- * Only verified agents can launch tokens and trade.
+ * Agent Registration & Management API with Supabase
  */
 
-const agents = new Map(); // In-memory for now, use Supabase in production
+import { supabase } from '../utils/supabase.js';
 
 /**
  * Register a new agent
  * POST /api/agents/register
- * 
- * Body: { name, description, ownerAddress, metadata }
  */
 export async function registerAgent(req, res) {
   try {
@@ -20,38 +16,48 @@ export async function registerAgent(req, res) {
       return res.status(400).json({ error: 'Name and owner address required' });
     }
     
-    // Generate agent ID
     const agentId = `agent_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const apiKey = `x402_${agentId}_${generateApiKey()}`;
     
     const agent = {
       id: agentId,
       name,
-      description,
-      ownerAddress,
+      description: description || '',
+      owner_address: ownerAddress,
+      api_key: apiKey,
       metadata: metadata || {},
-      apiKey,
-      createdAt: new Date().toISOString(),
-      reputation: 0,
-      launchedTokens: [],
-      totalVolume: 0
+      created_at: new Date().toISOString(),
+      reputation: 0
     };
     
-    agents.set(agentId, agent);
+    // Try to insert into Supabase
+    try {
+      const { error } = await supabase.from('agents').insert(agent);
+      if (error) throw error;
+    } catch (dbError) {
+      // If Supabase fails, use in-memory fallback
+      console.log('Using in-memory fallback for agents');
+    }
+    
+    // Store in memory as fallback
+    agents.set(agentId, { ...agent, apiKey });
     
     res.json({
       success: true,
       agent: {
         id: agent.id,
         name: agent.name,
-        createdAt: agent.createdAt
+        createdAt: agent.created_at
       },
-      apiKey: agent.apiKey
+      apiKey
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 }
+
+// In-memory fallback
+const agents = new Map();
 
 /**
  * Get agent info
@@ -59,13 +65,29 @@ export async function registerAgent(req, res) {
  */
 export async function getAgent(req, res) {
   const { id } = req.params;
-  const agent = agents.get(id);
   
+  // Try Supabase first
+  try {
+    const { data, error } = await supabase
+      .from('agents')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (data) {
+      const { api_key, ...safeAgent } = data;
+      return res.json({ agent: safeAgent });
+    }
+  } catch (e) {
+    console.log('Supabase query failed, trying memory');
+  }
+  
+  // Fallback to memory
+  const agent = agents.get(id);
   if (!agent) {
     return res.status(404).json({ error: 'Agent not found' });
   }
   
-  // Don't expose API key
   const { apiKey, ...safeAgent } = agent;
   res.json({ agent: safeAgent });
 }
@@ -82,7 +104,26 @@ export async function verifyAgent(req, res) {
       return res.status(400).json({ error: 'API key required' });
     }
     
-    // Find agent by API key
+    // Try Supabase
+    try {
+      const { data, error } = await supabase
+        .from('agents')
+        .select('id, name')
+        .eq('api_key', apiKey)
+        .single();
+      
+      if (data) {
+        return res.json({ 
+          valid: true, 
+          agentId: data.id,
+          name: data.name 
+        });
+      }
+    } catch (e) {
+      console.log('Supabase verify failed');
+    }
+    
+    // Fallback
     const agent = Array.from(agents.values()).find(a => a.apiKey === apiKey);
     
     if (!agent) {
@@ -104,6 +145,24 @@ export async function verifyAgent(req, res) {
  * GET /api/agents
  */
 export async function listAgents(req, res) {
+  try {
+    const { data, error } = await supabase
+      .from('agents')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (data && data.length > 0) {
+      const agentList = data.map(a => {
+        const { api_key, ...safe } = a;
+        return safe;
+      });
+      return res.json({ agents: agentList });
+    }
+  } catch (e) {
+    console.log('Supabase list failed');
+  }
+  
+  // Fallback
   const agentList = Array.from(agents.values()).map(a => {
     const { apiKey, ...safe } = a;
     return safe;
@@ -112,7 +171,6 @@ export async function listAgents(req, res) {
   res.json({ agents: agentList });
 }
 
-// Helper functions
 function generateApiKey() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   let key = '';
@@ -122,7 +180,6 @@ function generateApiKey() {
   return key;
 }
 
-// Export as router-compatible functions
 export default {
   registerAgent,
   getAgent,
