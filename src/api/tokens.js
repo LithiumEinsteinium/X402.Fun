@@ -1,25 +1,32 @@
 /**
- * Token Launch & Trading API
+ * Token Launch & Trading API with Solana Integration
  * 
  * Bonding curve implementation similar to Pump.fun
  * Multi-agent collaboration support
  */
 
+import { Connection, PublicKey } from '@solana/web3.js';
+
+const PROGRAM_ID = '63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF';
+const RPC_URL = 'https://api.devnet.solana.com';
+const connection = new Connection(RPC_URL, 'confirmed');
+
+const GRADUATION_LIQUIDITY_SOL = 1_500_000_000; // 1.5 SOL devnet
+const GRADUATION_LIQUIDITY_LAMPORTS = BigInt(GRADUATION_LIQUIDITY_SOL);
+const PLATFORM_FEE = 0.01; // 1%
+
 const tokens = new Map();
 const bondingCurves = new Map();
-
-const GRADUATION_MARKET_CAP = 12000; // $12K
-const PLATFORM_FEE = 0.01; // 1%
 
 /**
  * Launch a new token
  * POST /api/tokens/launch
  * 
- * Body: { agentId, name, symbol, uri, initialLiquiditySol }
+ * Body: { agentId, name, symbol, uri, creatorWallet }
  */
 export async function launchToken(req, res) {
   try {
-    const { agentId, name, symbol, uri, initialLiquiditySol } = req.body;
+    const { agentId, name, symbol, uri, creatorWallet } = req.body;
     
     if (!agentId || !name || !symbol) {
       return res.status(400).json({ error: 'Agent ID, name, and symbol required' });
@@ -42,7 +49,7 @@ export async function launchToken(req, res) {
       createdAt: new Date().toISOString(),
       totalBuys: 0,
       totalSells: 0,
-      marketCap: 0
+      liquidity: 0n
     };
     
     const token = {
@@ -52,6 +59,7 @@ export async function launchToken(req, res) {
       symbol,
       uri: uri || '',
       agentId,
+      creatorWallet: creatorWallet || '',
       bondingCurve,
       collaborators: [],
       graduated: false,
@@ -69,10 +77,13 @@ export async function launchToken(req, res) {
         name: token.name,
         symbol: token.symbol,
         bondingCurve: {
-          marketCap: 0,
-          price: calculatePrice(bondingCurve)
+          liquidity: 0,
+          price: calculatePrice(bondingCurve),
+          progress: 0
         }
-      }
+      },
+      // Transaction instructions would go here in production
+      message: 'Token launched on bonding curve (devnet mock)'
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -88,24 +99,15 @@ export async function getToken(req, res) {
   const token = tokens.get(id);
   
   if (!token) {
+    // Check by mint address
+    const tokenByMint = Array.from(tokens.values()).find(t => t.mint === id);
+    if (tokenByMint) {
+      return res.json({ token: formatToken(tokenByMint) });
+    }
     return res.status(404).json({ error: 'Token not found' });
   }
   
-  const curve = bondingCurves.get(token.mint);
-  
-  res.json({
-    token: {
-      ...token,
-      bondingCurve: curve ? {
-        marketCap: calculateMarketCap(curve),
-        price: calculatePrice(curve),
-        virtualSolReserves: curve.virtualSolReserves.toString(),
-        virtualTokenReserves: curve.virtualTokenReserves.toString(),
-        totalBuys: curve.totalBuys,
-        totalSells: curve.totalSells
-      } : null
-    }
-  });
+  res.json({ token: formatToken(token) });
 }
 
 /**
@@ -122,10 +124,7 @@ export async function listTokens(req, res) {
   }
   
   res.json({
-    tokens: tokenList.map(t => ({
-      ...t,
-      bondingCurve: undefined // Remove curve data for list
-    }))
+    tokens: tokenList.map(formatToken)
   });
 }
 
@@ -159,14 +158,15 @@ export async function buyTokens(req, res) {
     // Update reserves
     curve.virtualSolReserves += solIn;
     curve.virtualTokenReserves -= tokensOut;
+    curve.realSolReserves += solIn;
     curve.totalBuys++;
-    
-    // Calculate market cap
-    const marketCap = calculateMarketCap(curve);
-    curve.marketCap = marketCap;
+    curve.liquidity = Number(curve.realSolReserves) / 1e9;
     
     // Check for graduation
-    if (marketCap >= GRADUATION_MARKET_CAP) {
+    const progress = (curve.realSolReserves * 100n) / GRADUATION_LIQUIDITY_LAMPORTS;
+    const graduated = curve.realSolReserves >= GRADUATION_LIQUIDITY_LAMPORTS;
+    
+    if (graduated) {
       curve.complete = true;
       const token = Array.from(tokens.values()).find(t => t.mint === mint);
       if (token) token.graduated = true;
@@ -174,10 +174,12 @@ export async function buyTokens(req, res) {
     
     res.json({
       success: true,
-      tokensReceived: tokensOut.toString(),
-      marketCap,
+      tokensReceived: Number(tokensOut) / 1e9,
+      liquidity: curve.liquidity,
       price: calculatePrice(curve),
-      graduated: curve.complete
+      progress: Number(progress),
+      graduated: curve.complete,
+      message: 'Buy executed (devnet mock)'
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -213,16 +215,14 @@ export async function sellTokens(req, res) {
     // Update reserves
     curve.virtualSolReserves -= solOut;
     curve.virtualTokenReserves += tokensIn;
+    curve.realSolReserves -= solOut;
     curve.totalSells++;
-    
-    // Deduct platform fee
-    const fee = solOut * BigInt(PLATFORM_FEE * 100);
-    const netSolOut = solOut - fee;
+    curve.liquidity = Number(curve.realSolReserves) / 1e9;
     
     res.json({
       success: true,
-      solReceived: Number(netSolOut) / 1e9,
-      marketCap: calculateMarketCap(curve),
+      solReceived: Number(solOut) / 1e9,
+      liquidity: curve.liquidity,
       price: calculatePrice(curve)
     });
   } catch (error) {
@@ -231,10 +231,8 @@ export async function sellTokens(req, res) {
 }
 
 /**
- * Add collaborator to token
+ * Add contributor to token
  * POST /api/tokens/:id/collaborate
- * 
- * Body: { agentId, role, contribution }
  */
 export async function addCollaborator(req, res) {
   try {
@@ -264,9 +262,58 @@ export async function addCollaborator(req, res) {
   }
 }
 
+/**
+ * Contribute liquidity for graduation
+ * POST /api/tokens/:id/contribute
+ */
+export async function contributeLiquidity(req, res) {
+  try {
+    const { id } = req.params;
+    const { agentId, solAmount } = req.body;
+    
+    const token = tokens.get(id);
+    if (!token) {
+      return res.status(404).json({ error: 'Token not found' });
+    }
+    
+    const curve = bondingCurves.get(token.mint);
+    if (!curve) {
+      return res.status(404).json({ error: 'Bonding curve not found' });
+    }
+    
+    if (curve.complete) {
+      return res.status(400).json({ error: 'Already graduated' });
+    }
+    
+    // Add liquidity
+    const solIn = BigInt(Math.floor(solAmount * 1e9));
+    curve.realSolReserves += solIn;
+    curve.liquidity = Number(curve.realSolReserves) / 1e9;
+    
+    const progress = (curve.realSolReserves * 100n) / GRADUATION_LIQUIDITY_LAMPORTS;
+    const graduated = curve.realSolReserves >= GRADUATION_LIQUIDITY_LAMPORTS;
+    
+    if (graduated) {
+      curve.complete = true;
+      token.graduated = true;
+    }
+    
+    res.json({
+      success: true,
+      liquidity: curve.liquidity,
+      progress: Number(progress),
+      graduated: curve.complete,
+      target: GRADUATION_LIQUIDITY_SOL,
+      message: graduated ? 'Graduated! 🎉' : `${100 - Number(progress)}% to go`
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
 // Helper functions
 function generateMintAddress() {
-  const chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnopqrstuvwxyz';
   let addr = '';
   for (let i = 0; i < 44; i++) {
     addr += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -275,28 +322,42 @@ function generateMintAddress() {
 }
 
 function calculatePrice(curve) {
-  // Price = SOL reserves / Token reserves
   return Number(curve.virtualSolReserves) / Number(curve.virtualTokenReserves);
 }
 
-function calculateMarketCap(curve) {
-  // Market cap = token supply * price in SOL * SOL price (assume $100)
-  const price = calculatePrice(curve);
-  return price * Number(curve.tokenTotalSupply) / 1e9 * 100;
-}
-
 function calculateBuyOutput(solIn, solReserves, tokenReserves) {
-  // Constant product formula with tax
-  const tax = solIn / 100n; // 1% tax
+  const tax = solIn / 100n;
   const netSol = solIn - tax;
   return (netSol * tokenReserves) / (solReserves + netSol);
 }
 
 function calculateSellOutput(tokensIn, solReserves, tokenReserves) {
-  // Constant product formula with tax
   const tax = tokensIn / 100n;
   const netTokens = tokensIn - tax;
   return (netTokens * solReserves) / (tokenReserves + netTokens);
+}
+
+function formatToken(token) {
+  const curve = bondingCurves.get(token.mint);
+  const progress = curve ? (Number(curve.realSolReserves) * 100) / GRADUATION_LIQUIDITY_SOL : 0;
+  
+  return {
+    id: token.id,
+    mint: token.mint,
+    name: token.name,
+    symbol: token.symbol,
+    creator: token.agentId,
+    graduated: token.graduated,
+    collaborators: token.collaborators,
+    createdAt: token.createdAt,
+    bondingCurve: curve ? {
+      liquidity: curve.liquidity,
+      price: calculatePrice(curve),
+      progress: Math.min(100, progress),
+      totalBuys: curve.totalBuys,
+      totalSells: curve.totalSells
+    } : null
+  };
 }
 
 export default {
@@ -305,5 +366,6 @@ export default {
   listTokens,
   buyTokens,
   sellTokens,
-  addCollaborator
+  addCollaborator,
+  contributeLiquidity
 };

@@ -40,6 +40,7 @@ app.get('/api/tokens/:id', tokens.getToken);
 app.post('/api/tokens/buy', tokens.buyTokens);
 app.post('/api/tokens/sell', tokens.sellTokens);
 app.post('/api/tokens/:id/collaborate', tokens.addCollaborator);
+app.post('/api/tokens/:id/contribute', tokens.contributeLiquidity);
 
 app.get('/api/x402/price', x402.getPrice);
 app.post('/api/x402/verify', x402.verifyPayment);
