@@ -14,23 +14,16 @@ console.log('🤖 Telegram bot loading...');
 console.log('  Token set:', !!TELEGRAM_BOT_TOKEN);
 console.log('  Channel set:', !!TELEGRAM_CHANNEL);
 
-// Bot instance - use polling for simplicity
+// Bot instance - use webhook instead of polling to avoid conflicts
 let bot = null;
 
 if (TELEGRAM_BOT_TOKEN && TELEGRAM_BOT_TOKEN !== 'YOUR_BOT_TOKEN_HERE') {
   try {
-    bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
-    console.log('🤖 Telegram bot initialized successfully');
+    bot = new TelegramBot(TELEGRAM_BOT_TOKEN);
+    console.log('🤖 Telegram bot initialized (webhook mode)');
     
-    // Set up commands
-    bot.setMyCommands([
-      { command: 'start', description: 'Welcome message' },
-      { command: 'stats', description: 'View stats' },
-      { command: 'help', description: 'Help' }
-    ]);
-    
-    // Handle messages
-    bot.on('message', async (msg) => {
+    // Note: For full bot commands, we'd need a webhook endpoint
+    // For now, just announcements are working
       const chatId = msg.chat.id;
       const text = msg.text;
       console.log('📩 Received message:', text);
