@@ -2,6 +2,8 @@
  * x402 Payment Integration
  * 
  * Handle payments for token launches and API usage
+ * 
+ * DEVNET MODE: x402 payments are bypassed for testing!
  */
 
 import pkg from 'express';
@@ -147,9 +149,9 @@ function getPriceForAction(action) {
 }
 
 function verifyMockPayment(header, action) {
+  // DEVNET MODE: Always return true for testing!
   // In production, implement real x402 verification
-  // For now, accept any header for testing
-  return !!header;
+  return true;
 }
 
 export default {
