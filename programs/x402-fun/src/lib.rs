@@ -12,7 +12,13 @@ use anchor_spl::token::Mint;
 declare_id!("X402Fun1111111111111111111111111111111");
 
 pub mod constants {
-    pub const GRADUATION_LIQUIDITY_SOL: u64 = 69_000_000_000; // 69 SOL in lamports
+    // === CONFIGURATION ===
+    // Change these values for devnet vs mainnet:
+    // Devnet: 1.5 SOL = easy to test
+    // Mainnet: 69 SOL = ~$6k
+    pub const GRADUATION_LIQUIDITY_SOL: u64 = 1_500_000_000; // 1.5 SOL (devnet)
+    // pub const GRADUATION_LIQUIDITY_SOL: u64 = 69_000_000_000; // 69 SOL (mainnet)
+    
     pub const PLATFORM_FEE_BPS: u16 = 100; // 1%
     pub const CREATOR_FEE_BPS: u16 = 200; // 2%
 }
