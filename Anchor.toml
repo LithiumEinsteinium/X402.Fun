@@ -1,13 +1,19 @@
+[toolchain]
+anchor_version = "0.32.1"
+
 [toolbox]
 network = "devnet"
-wallet = "~/.config/solana/id.json"
+wallet = "/home/dane/solana-wallet.json"
 
 [provider]
 cluster = "devnet"
-wallet = "~/.config/solana/id.json"
+wallet = "/home/dane/solana-wallet.json"
 
-[programs]
-x402_fun = "X402Fun1111111111111111111111111111111"
+[programs.localnet]
+x402_fun = "63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF"
+
+[programs.devnet]
+x402_fun = "63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF"
 
 [registry]
 url = "https://api.apr.dev"

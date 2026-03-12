@@ -7,7 +7,7 @@
  */
 
 use anchor_lang::prelude::*;
-use anchor_spl::token::Mint;
+use anchor_spl::token_interface::Mint;
 
 declare_id!("63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF");
 
@@ -277,7 +277,7 @@ pub struct Initialize<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + 32 + 32 + 1 + 8 + 8 + 8 + 8, // discriminator + fields
+        space = 8 + 32 + 32 + 1 + 8 + 8 + 8 + 8,
         seeds = [b"global"],
         bump
     )]
@@ -296,9 +296,6 @@ pub struct LaunchToken<'info> {
     #[account(
         init,
         payer = creator,
-        // 8 disc + 32 mint + 32 creator + 32 bonding_curve
-        // + (4+50) name + (4+10) symbol + (4+200) uri
-        // + 1 graduated + 1 completed + 8 + 8 + 8
         space = 8 + 32 + 32 + 32 + 54 + 14 + 204 + 1 + 1 + 8 + 8 + 8,
         seeds = [b"token", mint.key().as_ref()],
         bump
@@ -307,7 +304,6 @@ pub struct LaunchToken<'info> {
     #[account(
         init,
         payer = creator,
-        // 8 disc + 32 mint + 8*5 reserves/supply + 1 complete
         space = 8 + 32 + 8 + 8 + 8 + 8 + 8 + 1,
         seeds = [b"curve", mint.key().as_ref()],
         bump
@@ -321,10 +317,10 @@ pub struct LaunchToken<'info> {
         seeds = [b"mint", creator.key().as_ref(), name.as_bytes()],
         bump
     )]
-    pub mint: Account<'info, Mint>,
+    pub mint: InterfaceAccount<'info, Mint>,
     #[account(mut)]
     pub creator: Signer<'info>,
-    pub token_program: Program<'info, anchor_spl::token::Token>,
+    pub token_program: Interface<'info, anchor_spl::token_interface::TokenInterface>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
 }
