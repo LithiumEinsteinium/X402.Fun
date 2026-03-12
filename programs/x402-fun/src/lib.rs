@@ -9,7 +9,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::Mint;
 
-declare_id!("X402Fun1111111111111111111111111111111");
+declare_id!("63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF");
 
 pub mod constants {
     // === CONFIGURATION ===
