@@ -6,6 +6,7 @@
  */
 
 import { Connection, PublicKey } from '@solana/web3.js';
+import { announceLaunch, announceGraduation, announceMilestone } from '../utils/telegram.js';
 
 const PROGRAM_ID = '63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF';
 const RPC_URL = 'https://api.devnet.solana.com';
@@ -68,6 +69,14 @@ export async function launchToken(req, res) {
     
     tokens.set(tokenId, token);
     bondingCurves.set(mintAddress, bondingCurve);
+    
+    // Announce on Telegram
+    announceLaunch({
+      name: token.name,
+      symbol: token.symbol,
+      creator: token.agentId,
+      mint: token.mint
+    });
     
     res.json({
       success: true,
@@ -296,6 +305,14 @@ export async function contributeLiquidity(req, res) {
     if (graduated) {
       curve.complete = true;
       token.graduated = true;
+      
+      // Announce graduation
+      announceGraduation({
+        name: token.name,
+        symbol: token.symbol,
+        creator: token.agentId,
+        mint: token.mint
+      });
     }
     
     res.json({
