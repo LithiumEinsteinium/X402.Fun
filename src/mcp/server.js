@@ -2,16 +2,21 @@
  * X402.Fun MCP Server
  * 
  * AI agents use this to interact with the platform
+ * 
+ * Usage:
+ *   npm run mcp
+ * 
+ * Or connect via Claude Desktop / other MCP clients
  */
 
-const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
-const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
-const {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} = require('@modelcontextprotocol/sdk/types.js');
+import pkg from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import pkg2 from '@modelcontextprotocol/sdk/types.js';
 
-const API_BASE = process.env.API_BASE || 'http://localhost:3000';
+const { Server } = pkg;
+const { CallToolRequestSchema, ListToolsRequestSchema } = pkg2;
+
+const API_BASE = process.env.API_BASE || 'https://x402-fun.onrender.com';
 
 // Available MCP tools for agents
 const tools = [
@@ -35,9 +40,9 @@ const tools = [
       type: 'object',
       properties: {
         agentId: { type: 'string', description: 'Your agent ID' },
-        name: { type: 'string', description: 'Token name' },
-        symbol: { type: 'string', description: 'Token symbol' },
-        uri: { type: 'string', description: 'Token metadata URI' }
+        name: { type: 'string', description: 'Token name (e.g., "SolMeme")' },
+        symbol: { type: 'string', description: 'Token symbol (e.g., "SMEME")' },
+        uri: { type: 'string', description: 'Token metadata URI (optional)' }
       },
       required: ['agentId', 'name', 'symbol']
     }
@@ -90,8 +95,21 @@ const tools = [
     }
   },
   {
+    name: 'x402fun_contribute_liquidity',
+    description: 'Contribute liquidity to help a token graduate',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tokenId: { type: 'string', description: 'Token ID' },
+        agentId: { type: 'string', description: 'Your agent ID' },
+        solAmount: { type: 'number', description: 'Amount of SOL to contribute' }
+      },
+      required: ['tokenId', 'agentId', 'solAmount']
+    }
+  },
+  {
     name: 'x402fun_collaborate',
-    description: 'Add collaboration to a token (liquidity, marketing, etc)',
+    description: 'Register as a collaborator on a token',
     inputSchema: {
       type: 'object',
       properties: {
@@ -149,6 +167,10 @@ async function callTool(name, args) {
         method = 'GET';
         body = null;
         break;
+      case 'x402fun_contribute_liquidity':
+        endpoint = `/api/tokens/${args.tokenId}/contribute`;
+        body = { agentId: args.agentId, solAmount: args.solAmount };
+        break;
       case 'x402fun_collaborate':
         endpoint = `/api/tokens/${args.tokenId}/collaborate`;
         body = { agentId: args.agentId, role: args.role, contribution: args.contribution };
@@ -161,6 +183,8 @@ async function callTool(name, args) {
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
+
+    console.log(`[MCP] Calling ${method} ${endpoint}`);
 
     const response = await fetch(`${API_BASE}${endpoint}`, {
       method,
@@ -197,7 +221,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 // Start server
-const transport = new StdioServerTransport();
-server.connect(transport);
+async function main() {
+  console.log('🤖 X402.Fun MCP Server starting...');
+  console.log(`   API: ${API_BASE}`);
+  
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  
+  console.log('✅ MCP Server ready!');
+}
 
-console.error('🤖 X402.Fun MCP Server running...');
+main().catch(console.error);
