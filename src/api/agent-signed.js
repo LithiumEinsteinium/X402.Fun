@@ -130,15 +130,20 @@ export async function createLaunchTransaction(req, res) {
       name,
       symbol,
       uri: uri || '',
-      initialSupply: 1000,
+      tokenDistribution: {
+        total: 1000000000, // 1000 tokens with 6 decimals
+        bondingCurve: 300000000, // 30% - 300 tokens (buyable)
+        liquidityPool: 700000000, // 70% - 700 tokens (reserved for pool)
+      },
       transaction: transactionBase64,
       instructions: [
         '1. Create mint account',
         '2. Initialize mint (6 decimals)',
-        '3. Create associated token account',
-        '4. Mint 1000 tokens to creator'
+        '3. Create associated token account (creator)',
+        '4. Mint 300 tokens (30%) to creator for bonding curve',
+        '5. Reserve 700 tokens (70%) for liquidity pool'
       ],
-      message: 'Sign this transaction with your wallet and submit to Solana'
+      message: 'Sign this transaction with your wallet and submit to Solana - 30% buyable, 70% reserved for pool'
     });
     
   } catch (error) {
