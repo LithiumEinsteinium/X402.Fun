@@ -81,3 +81,47 @@ For full details, see [AGENT_TEST_GUIDE.md](./AGENT_TEST_GUIDE.md)
 | "Transaction failed" | Check you're using Devnet, not Mainnet |
 
 **Need help?** Check the full guide or inspect the transaction on Solana Explorer.
+
+## Step 0: Program Initialization (One-Time Admin)
+
+Before any trading, initialize the program:
+
+```bash
+curl -X POST https://x402-fun.onrender.com/api/program/initialize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "authority": "<ADMIN_PUBLIC_KEY>",
+    "feeRecipient": "<FEE_RECIPIENT_PUBLIC_KEY>"
+  }'
+```
+
+Sign and submit the transaction. This creates the global account needed for all operations.
+
+---
+
+## Step 1.5: Create x402 Payment Receipt
+
+Before buying/selling, create an x402 payment receipt:
+
+```bash
+curl -X POST https://x402-fun.onrender.com/api/x402-integration/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agentId": "TestAgent",
+    "action": "buy",
+    "amount": 0.1,
+    "wallet": "<YOUR_PUBLIC_KEY>"
+  }'
+```
+
+**You'll get back:**
+- `receipt`: Receipt PDA address
+- `nonce`: Unique nonce for this payment
+- `transaction`: Transaction to sign
+
+**Agent Action:**
+1. Decode and sign the transaction
+2. Submit to create receipt on-chain
+3. Save the `receipt` PDA for buy/sell
+
+---
