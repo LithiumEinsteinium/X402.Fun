@@ -9,12 +9,9 @@
  * Or connect via Claude Desktop / other MCP clients
  */
 
-import pkg from '@modelcontextprotocol/sdk/server/index.js';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import pkg2 from '@modelcontextprotocol/sdk/types.js';
-
-const { Server } = pkg;
-const { CallToolRequestSchema, ListToolsRequestSchema } = pkg2;
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 const API_BASE = process.env.API_BASE || 'https://x402-fun.onrender.com';
 
@@ -42,9 +39,10 @@ const tools = [
         agentId: { type: 'string', description: 'Your agent ID' },
         name: { type: 'string', description: 'Token name (e.g., "SolMeme")' },
         symbol: { type: 'string', description: 'Token symbol (e.g., "SMEME")' },
-        uri: { type: 'string', description: 'Token metadata URI (optional)' }
+        uri: { type: 'string', description: 'Token metadata URI (optional)' },
+        creatorWallet: { type: 'string', description: 'Creator wallet address' }
       },
-      required: ['agentId', 'name', 'symbol']
+      required: ['agentId', 'name', 'symbol', 'creatorWallet']
     }
   },
   {
@@ -78,14 +76,12 @@ const tools = [
     description: 'List all tokens on the platform',
     inputSchema: {
       type: 'object',
-      properties: {
-        graduated: { type: 'boolean', description: 'Filter by graduation status' }
-      }
+      properties: {}
     }
   },
   {
     name: 'x402fun_get_token',
-    description: 'Get details about a specific token',
+    description: 'Get details of a specific token',
     inputSchema: {
       type: 'object',
       properties: {
@@ -96,139 +92,166 @@ const tools = [
   },
   {
     name: 'x402fun_contribute_liquidity',
-    description: 'Contribute liquidity to help a token graduate',
+    description: 'Add SOL liquidity to help a token graduate',
     inputSchema: {
       type: 'object',
       properties: {
-        tokenId: { type: 'string', description: 'Token ID' },
         agentId: { type: 'string', description: 'Your agent ID' },
+        id: { type: 'string', description: 'Token ID' },
         solAmount: { type: 'number', description: 'Amount of SOL to contribute' }
       },
-      required: ['tokenId', 'agentId', 'solAmount']
+      required: ['agentId', 'id', 'solAmount']
     }
   },
   {
-    name: 'x402fun_collaborate',
-    description: 'Register as a collaborator on a token',
+    name: 'x402fun_get_payment_info',
+    description: 'Get payment info for an action',
     inputSchema: {
       type: 'object',
       properties: {
-        tokenId: { type: 'string', description: 'Token ID' },
-        agentId: { type: 'string', description: 'Your agent ID' },
-        role: { type: 'string', description: 'Role: liquidity, marketing, dev, community' },
-        contribution: { type: 'string', description: 'Description of contribution' }
-      },
-      required: ['tokenId', 'agentId', 'role']
-    }
-  },
-  {
-    name: 'x402fun_get_price',
-    description: 'Get x402 payment price for an action',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        action: { type: 'string', description: 'Action: launch, buy, sell, api' }
+        action: { type: 'string', description: 'Action (launch, buy, etc.)' }
       },
       required: ['action']
+    }
+  },
+  {
+    name: 'x402fun_verify_payment',
+    description: 'Verify payment was made',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        wallet: { type: 'string', description: 'Wallet address' },
+        action: { type: 'string', description: 'Action that was paid for' }
+      },
+      required: ['wallet', 'action']
+    }
+  },
+  {
+    name: 'x402fun_get_config',
+    description: 'Get platform configuration',
+    inputSchema: {
+      type: 'object',
+      properties: {}
     }
   }
 ];
 
-// Tool implementations
-async function callTool(name, args) {
-  try {
-    let endpoint = '';
-    let method = 'POST';
-    let body = args;
+class X402FunServer {
+  constructor() {
+    this.server = new Server(
+      {
+        name: 'x402-fun',
+        version: '1.0.0',
+      },
+      {
+        capabilities: {
+          tools: {},
+        },
+      }
+    );
+
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+      return { tools };
+    });
+
+    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      try {
+        const { name, arguments: args } = request.params;
+        const result = await this.handleTool(name, args);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: ${error.message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    });
+  }
+
+  async handleTool(name, args) {
+    let endpoint = API_BASE;
+    let method = 'GET';
+    let body = null;
 
     switch (name) {
       case 'x402fun_register_agent':
-        endpoint = '/api/agents/register';
+        endpoint += '/api/agents/register';
+        method = 'POST';
+        body = args;
         break;
       case 'x402fun_launch_token':
-        endpoint = '/api/tokens/launch';
+        endpoint += '/api/agent/create-launch';
+        method = 'POST';
+        body = args;
         break;
       case 'x402fun_buy_token':
-        endpoint = '/api/tokens/buy';
+        endpoint += '/api/tokens/buy';
+        method = 'POST';
+        body = args;
         break;
       case 'x402fun_sell_token':
-        endpoint = '/api/tokens/sell';
+        endpoint += '/api/tokens/sell';
+        method = 'POST';
+        body = args;
         break;
       case 'x402fun_list_tokens':
-        endpoint = '/api/tokens';
-        if (args.graduated !== undefined) {
-          endpoint += `?graduated=${args.graduated}`;
-        }
-        method = 'GET';
-        body = null;
+        endpoint += '/api/tokens';
         break;
       case 'x402fun_get_token':
-        endpoint = `/api/tokens/${args.id}`;
-        method = 'GET';
-        body = null;
+        endpoint += `/api/tokens/${args.id}`;
         break;
       case 'x402fun_contribute_liquidity':
-        endpoint = `/api/tokens/${args.tokenId}/contribute`;
+        endpoint += `/api/tokens/${args.id}/contribute`;
+        method = 'POST';
         body = { agentId: args.agentId, solAmount: args.solAmount };
         break;
-      case 'x402fun_collaborate':
-        endpoint = `/api/tokens/${args.tokenId}/collaborate`;
-        body = { agentId: args.agentId, role: args.role, contribution: args.contribution };
+      case 'x402fun_get_payment_info':
+        endpoint += `/api/x402/price?action=${args.action || 'launch'}`;
         break;
-      case 'x402fun_get_price':
-        endpoint = `/api/x402/price?action=${args.action}`;
-        method = 'GET';
-        body = null;
+      case 'x402fun_verify_payment':
+        endpoint += '/api/x402/verify';
+        method = 'POST';
+        body = args;
+        break;
+      case 'x402fun_get_config':
+        endpoint += '/api/agent/config';
         break;
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
 
-    console.log(`[MCP] Calling ${method} ${endpoint}`);
-
-    const response = await fetch(`${API_BASE}${endpoint}`, {
+    const options = {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : null
-    });
+    };
 
-    const result = await response.json();
-    
-    if (!response.ok) {
-      return { content: [{ type: 'text', text: `Error: ${JSON.stringify(result)}` }] };
+    if (body) {
+      options.body = JSON.stringify(body);
     }
 
-    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-  } catch (error) {
-    return { content: [{ type: 'text', text: `Error: ${error.message}` }] };
+    const response = await fetch(endpoint, options);
+    const data = await response.json();
+    return data;
+  }
+
+  async start() {
+    const transport = new StdioServerTransport();
+    await this.server.connect(transport);
+    console.log('🤖 X402.Fun MCP Server running...');
   }
 }
 
-// Create MCP server
-const server = new Server(
-  { name: 'x402-fun', version: '1.0.0' },
-  { capabilities: { tools: {} } }
-);
-
-// Handle requests
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return { tools };
-});
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-  return await callTool(name, args);
-});
-
-// Start server
-async function main() {
-  console.log('🤖 X402.Fun MCP Server starting...');
-  console.log(`   API: ${API_BASE}`);
-  
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  
-  console.log('✅ MCP Server ready!');
-}
-
-main().catch(console.error);
+const server = new X402FunServer();
+server.start().catch(console.error);
