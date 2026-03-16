@@ -98,6 +98,9 @@ export async function createLaunchTransaction(req, res) {
     res.json({
       success: true,
       mint: mintPublicKey.toBase58(),
+      name,
+      symbol,
+      uri: uri || '',
       transaction: transactionBase64,
       instructions: [
         'Create mint account',
