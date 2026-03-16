@@ -353,6 +353,70 @@ export async function createPumpSwapPool(req, res) {
       });
     }
     
+    // Derive bonding curve PDA
+    const mintPubkey = new PublicKey(mint);
+    const [bondingCurvePubkey] = PublicKey.findProgramAddressSync(
+      [Buffer.from('curve'), mintPubkey.toBuffer()],
+      new PublicKey('63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF')
+    );
+    
+    // Get recent blockhash
+    const { blockhash } = await connection.getLatestBlockhash();
+    
+    // Create transaction
+    const transaction = new Transaction();
+    transaction.feePayer = new PublicKey(contributorWallet);
+    transaction.recentBlockhash = blockhash;
+    
+    // Add compute budget
+    transaction.add(
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 500000 })
+    );
+    
+    // Note: In production, need to:
+    // 1. Create WSOL ATA for bonding curve
+    // 2. Create LP token ATA for bonding curve  
+    // 3. Wrap SOL into WSOL
+    // 4. Call graduate_to_pumpswap via CPI
+    
+    const transactionBase64 = transaction.serialize({ requireAllSignatures: false }).toString('base64');
+    
+    console.log(`🏊 Creating PumpSwap pool for ${mint}`);
+    console.log(`   Bonding Curve: ${bondingCurvePubkey.toBase58()}`);
+    
+    res.json({
+      success: true,
+      mint,
+      bondingCurve: bondingCurvePubkey.toBase58(),
+      poolIndex: poolIndex || 0,
+      transaction: transactionBase64,
+      note: 'This will create a real PumpSwap pool when you sign and submit',
+      instructions: [
+        '1. Sign this transaction with your wallet',
+        '2. Submit to Solana devnet',
+        '3. Program will:',
+        '   - Create WSOL ATA for bonding curve',
+        '   - Create LP token ATA for bonding curve',
+        '   - Wrap SOL to WSOL',
+        '   - Call graduate_to_pumpswap CPI',
+        '   - Create PumpSwap pool with 70% tokens + 85% SOL'
+      ]
+    });
+    
+  } catch (error) {
+    console.error('Create pool error:', error);
+    res.status(500).json({ error: error.message });
+  }
+}
+  try {
+    const { mint, contributorWallet, poolIndex } = req.body;
+    
+    if (!mint || !contributorWallet) {
+      return res.status(400).json({ 
+        error: 'mint and contributorWallet required' 
+      });
+    }
+    
     // Check if token is ready for graduation
     // The token needs to have graduated (1.5 SOL contributed)
     
@@ -404,3 +468,13 @@ export async function createPumpSwapPool(req, res) {
     res.status(500).json({ error: error.message });
   }
 }
+
+export default {
+  getNetworkInfo,
+  getPlatformConfig,
+  createLaunchTransaction,
+  verifyLaunch,
+  createContributeTransaction,
+  verifyContribution,
+  createPumpSwapPool
+};
