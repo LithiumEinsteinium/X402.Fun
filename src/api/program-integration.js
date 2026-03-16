@@ -31,6 +31,7 @@ const PUMPSWAP_PROGRAM = 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA';
 const WRAPPED_SOL_MINT_STR = 'So11111111111111111111111111111111111111112';
 const TOKEN_2022_STR = 'TokenzQdBNbLqP5VEhdkAS6tFqe37MFtyb1ZuToBMwExT';
 const TOKEN_PROGRAM_STR = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const SYSTEM_PROGRAM_ID = '11111111111111111111111111111111';
 
 export async function getPlatformConfig(req, res) {
   res.json({
@@ -588,7 +589,7 @@ export async function createBuyTransaction(req, res) {
     );
     
     // Buy instruction data: discriminator + sol_amount (u64) + min_tokens_out (u64) + nonce (32 bytes)
-    const BUY_DISCRIMINATOR = Buffer.from([0xce, 0x16, 0x7a, 0x81, 0x79, 0x4e, 0x2a, 0x3a]); // sha256("global:buy")[:8]
+    const BUY_DISCRIMINATOR = Buffer.from([102, 6, 61, 18, 1, 218, 235, 234]); // sha256("global:buy")[:8] // sha256("global:buy")[:8]
     const solAmountBuf = Buffer.alloc(8);
     solAmountBuf.writeBigUInt64LE(BigInt(Math.floor(solAmount * 1e9)));
     const minTokensBuf = Buffer.alloc(8);
@@ -628,6 +629,38 @@ export async function createBuyTransaction(req, res) {
     console.error('Buy error:', error);
     res.status(500).json({ error: error.message });
   }
+}
+
+// Create a sell transaction from bonding curve
+export async function createSellTransaction(req, res) {
+ try {
+ const { mint, sellerWallet, tokenAmount, minSolOut } = req.body;
+ if (!mint || !sellerWallet || !tokenAmount) { return res.status(400).json({ error: "mint, sellerWallet, and tokenAmount required" }); }
+ const mintPubkey = new PublicKey(mint);
+ const seller = new PublicKey(sellerWallet);
+ const programPubkey = new PublicKey(PROGRAM_ID);
+ const [bondingCurvePubkey] = PublicKey.findProgramAddressSync([Buffer.from("curve"), mintPubkey.toBuffer()], programPubkey);
+ const [tokenPubkey] = PublicKey.findProgramAddressSync([Buffer.from("token"), mintPubkey.toBuffer()], programPubkey);
+ const [globalPubkey] = PublicKey.findProgramAddressSync([Buffer.from("global")], programPubkey);
+ const vaultTokenAccount = getAssociatedTokenAddressSync(mintPubkey, bondingCurvePubkey, true, TOKEN_PROGRAM_STR);
+ const sellerTokenAccount = getAssociatedTokenAddressSync(mintPubkey, seller, true, TOKEN_PROGRAM_STR);
+ const nonce = crypto.randomBytes(32);
+ const [x402Receipt] = PublicKey.findProgramAddressSync([Buffer.from("x402"), seller.toBuffer(), nonce], programPubkey);
+ const feeRecipient = new PublicKey("7tZMag1w7P1YyGCbAMCdsrYqgeHMm5EdAzKpDs12mmTR");
+ const creator = seller;
+ const { blockhash } = await connection.getLatestBlockhash();
+ const transaction = new Transaction();
+ transaction.feePayer = seller;
+ transaction.recentBlockhash = blockhash;
+ transaction.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 600000 }));
+ const SELL_DISCRIMINATOR = Buffer.from([51, 230, 133, 164, 1, 127, 131, 173]); // sha256("global:sell")[:8]
+ const tokenAmountBuf = Buffer.alloc(8); tokenAmountBuf.writeBigUInt64LE(BigInt(Math.floor(tokenAmount * 1e6)));
+ const minSolBuf = Buffer.alloc(8); minSolBuf.writeBigUInt64LE(BigInt(Math.floor((minSolOut || 0) * 1e9)));
+ const instructionData = Buffer.concat([SELL_DISCRIMINATOR, tokenAmountBuf, minSolBuf, Buffer.from(nonce)]);
+ transaction.add({ keys: [{ pubkey: globalPubkey, isSigner: false, isWritable: false }, { pubkey: x402Receipt, isSigner: false, isWritable: true }, { pubkey: tokenPubkey, isSigner: false, isWritable: true }, { pubkey: bondingCurvePubkey, isSigner: false, isWritable: true }, { pubkey: vaultTokenAccount, isSigner: false, isWritable: true }, { pubkey: sellerTokenAccount, isSigner: false, isWritable: true }, { pubkey: mintPubkey, isSigner: false, isWritable: false }, { pubkey: seller, isSigner: true, isWritable: true }, { pubkey: feeRecipient, isSigner: false, isWritable: true }, { pubkey: creator, isSigner: false, isWritable: false }, { pubkey: new PublicKey(TOKEN_PROGRAM_STR), isSigner: false, isWritable: false }, { pubkey: new PublicKey(SYSTEM_PROGRAM_ID), isSigner: false, isWritable: false }], programId: programPubkey, data: instructionData });
+ const transactionBase64 = transaction.serialize({ requireAllSignatures: false }).toString("base64");
+ res.json({ success: true, mint, seller: sellerWallet, tokenAmount, minSolOut: minSolOut || "auto-calculated", x402Receipt: x402Receipt.toBase58(), vaultTokenAccount: vaultTokenAccount.toBase58(), sellerTokenAccount: sellerTokenAccount.toBase58(), transaction: transactionBase64, message: "Sign to sell " + tokenAmount + " tokens" });
+ } catch (error) { console.error("Sell error:", error); res.status(500).json({ error: error.message }); }
 }
 
 export default {
