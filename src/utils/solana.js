@@ -10,10 +10,8 @@ import {
   PublicKey, 
   Keypair, 
   Transaction, 
-  SystemProgram,
-  ComputeBudgetProgram
+  SystemProgram
 } from '@solana/web3.js';
-import { Token, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import bs58 from 'bs58';
 
 // Config
