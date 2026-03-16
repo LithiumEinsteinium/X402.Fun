@@ -38,11 +38,19 @@ import agents from './api/agents.js';
 import tokens from './api/tokens.js';
 import x402 from './api/x402.js';
 import pumpswap from './api/pumpswap.js';
+import agentSigned from './api/agent-signed.js';
 
 app.post('/api/agents/register', agents.registerAgent);
 app.get('/api/agents/:id', agents.getAgent);
 app.post('/api/agents/verify', agents.verifyAgent);
 app.get('/api/agents', agents.listAgents);
+
+// Agent-signed endpoints (for decentralized launches)
+app.get('/api/agent/config', agentSigned.getPlatformConfig);
+app.post('/api/agent/create-launch', agentSigned.createLaunchTransaction);
+app.post('/api/agent/verify-launch', agentSigned.verifyLaunch);
+app.post('/api/agent/create-contribute', agentSigned.createContributeTransaction);
+app.post('/api/agent/verify-contribute', agentSigned.verifyContribution);
 
 app.post('/api/tokens/launch', tokens.launchToken);
 app.get('/api/tokens', tokens.listTokens);
