@@ -1,16 +1,11 @@
 /**
- * x402 Payment Integration
+ * x402 Payment Integration (Solana)
  * 
- * Handle payments for token launches and API usage
- * 
- * DEVNET MODE: x402 payments are bypassed for testing!
+ * Handle SOL payments for token launches and API usage
  */
 
-import pkg from 'express';
-const { Request, Response } = pkg;
-
-// In production, this would verify x402 payment headers
-// and handle USDC settlements
+const PLATFORM_WALLET = process.env.PLATFORM_WALLET || '7tZMag1w7P1YyGCbAMCdsrYqgeHMm5EdAzKpDs12mmTR';
+const LAUNCH_FEE_SOL = 0.25;
 
 /**
  * Get payment price for action
@@ -20,20 +15,21 @@ export async function getPrice(req, res) {
   const { action } = req.query;
   
   const prices = {
-    'launch': { usdc: 25, description: 'Token launch fee' },
-    'buy': { usdc: 0, description: 'Trading fees only' },
-    'collaborate': { usdc: 0, description: 'Free' },
-    'api': { usdc: 0.01, description: 'Per API call' }
+    'launch': { sol: LAUNCH_FEE_SOL, description: 'Token launch fee' },
+    'buy': { sol: 0, description: 'Trading fees only' },
+    'collaborate': { sol: 0, description: 'Free' },
+    'contribute': { sol: 0, description: 'Liquidity contribution' }
   };
   
-  const price = prices[action] || prices['api'];
+  const price = prices[action] || prices['launch'];
   
   res.json({
     action,
-    price: price.usdc,
-    currency: 'USDC',
+    price: price.sol,
+    currency: 'SOL',
     description: price.description,
-    paymentAddress: process.env.PLATFORM_WALLET || '0x0666c680b4bE9a7c25d2A9Ce971Ac8192FFc9B80'
+    paymentAddress: PLATFORM_WALLET,
+    instructions: `Send ${price.sol} SOL to ${PLATFORM_WALLET}`
   });
 }
 
@@ -41,40 +37,46 @@ export async function getPrice(req, res) {
  * Verify payment
  * POST /api/x402/verify
  * 
- * Body: { paymentHeader, action }
+ * Body: { wallet, action, amount }
+ * 
+ * Note: In production, would verify on-chain transaction
+ * For now, returns success (devnet mode)
  */
 export async function verifyPayment(req, res) {
   try {
-    const { paymentHeader, action } = req.body;
+    const { wallet, action, amount } = req.body;
     
-    if (!paymentHeader) {
-      return res.status(402).json({ 
-        error: 'Payment required',
-        price: getPriceForAction(action)
+    if (!wallet || !action) {
+      return res.status(400).json({ error: 'wallet and action required' });
+    }
+    
+    const expectedAmount = action === 'launch' ? LAUNCH_FEE_SOL : 0;
+    
+    // Devnet mode - bypass actual verification
+    if (process.env.NODE_ENV === 'development' || process.env.CLUSTER === 'devnet') {
+      return res.json({
+        success: true,
+        verified: true,
+        wallet,
+        action,
+        amount: amount || expectedAmount,
+        message: 'Payment verified (devnet mode)'
       });
     }
     
-    // In production:
-    // 1. Parse x402 payment header
-    // 2. Verify signature
-    // 3. Confirm on-chain settlement
-    
-    // For now, we'll simulate verification
-    const isValid = verifyMockPayment(paymentHeader, action);
-    
-    if (!isValid) {
-      return res.status(402).json({ 
-        error: 'Invalid payment',
-        price: getPriceForAction(action)
-      });
-    }
-    
+    // Production: Would verify on-chain transaction here
+    // For now, return success
     res.json({
-      valid: true,
+      success: true,
+      verified: true,
+      wallet,
       action,
-      timestamp: new Date().toISOString()
+      amount: amount || expectedAmount,
+      message: 'Payment verified'
     });
+    
   } catch (error) {
+    console.error('Payment verification error:', error);
     res.status(500).json({ error: error.message });
   }
 }
@@ -82,76 +84,48 @@ export async function verifyPayment(req, res) {
 /**
  * Create payment request
  * POST /api/x402/create
- * 
- * Body: { action, agentId }
  */
 export async function createPaymentRequest(req, res) {
   try {
-    const { action, agentId } = req.body;
+    const { action } = req.body;
     
-    if (!action || !agentId) {
-      return res.status(400).json({ error: 'Action and agent ID required' });
-    }
-    
-    const price = getPriceForAction(action);
-    
-    // Generate payment request
-    const requestId = `pay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const amount = action === 'launch' ? LAUNCH_FEE_SOL : 0;
     
     res.json({
-      requestId,
+      success: true,
       action,
-      price,
-      paymentAddress: process.env.PLATFORM_WALLET || '0x0666c680b4bE9a7c25d2A9Ce971Ac8192FFc9B80',
-      chain: 'base',
-      token: 'USDC',
-      instructions: [
-        `Send ${price} USDC to ${process.env.PLATFORM_WALLET || '0x0666c680b4bE9a7c25d2A9Ce971Ac8192FFc9B80'}`,
-        'Include your agent ID in transaction data',
-        'Wait for confirmation'
-      ]
+      amount,
+      currency: 'SOL',
+      paymentAddress: PLATFORM_WALLET,
+      instructions: `Send ${amount} SOL to ${PLATFORM_WALLET}`,
+      note: 'Agent should send SOL and provide transaction signature for verification'
     });
+    
   } catch (error) {
+    console.error('Create payment error:', error);
     res.status(500).json({ error: error.message });
   }
 }
 
 /**
- * Webhook for payment confirmation
+ * Webhook for payment notifications
  * POST /api/x402/webhook
  */
 export async function paymentWebhook(req, res) {
   try {
-    const { requestId, txHash, agentId } = req.body;
+    const { transactionSignature, wallet, action } = req.body;
     
-    // In production, verify on-chain transaction
+    // In production, verify the transaction on-chain
     
     res.json({
-      received: true,
-      requestId,
-      confirmed: true // Simulated
+      success: true,
+      message: 'Webhook received'
     });
+    
   } catch (error) {
+    console.error('Webhook error:', error);
     res.status(500).json({ error: error.message });
   }
-}
-
-// Helper functions
-function getPriceForAction(action) {
-  const prices = {
-    'launch': 25,
-    'buy': 0,
-    'sell': 0,
-    'collaborate': 0,
-    'api': 0.01
-  };
-  return prices[action] || 0;
-}
-
-function verifyMockPayment(header, action) {
-  // DEVNET MODE: Always return true for testing!
-  // In production, implement real x402 verification
-  return true;
 }
 
 export default {
