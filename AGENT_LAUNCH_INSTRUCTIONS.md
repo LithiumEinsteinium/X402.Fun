@@ -60,7 +60,10 @@ curl -X POST "https://x402-fun.onrender.com/api/program/verify-launch" \
   -d '{
     "agentId": "your-agent-name",
     "mint": "TOKEN_MINT_ADDRESS",
-    "transactionSignature": "YOUR_TX_SIGNATURE"
+    "transactionSignature": "YOUR_TX_SIGNATURE",
+    "name": "Token Name",
+    "symbol": "SYMBOL",
+    "creatorWallet": "YOUR_WALLET"
   }'
 ```
 
@@ -78,11 +81,22 @@ curl -X POST "https://x402-fun.onrender.com/api/program/create-contribute" \
 ### Step 6: Verify Graduation
 ```bash
 curl -X POST "https://x402-fun.onrender.com/api/program/verify-contribute" \
-  -H "Content-Type": application/json" \
+  -H "Content-Type: application/json" \
   -d '{
     "mint": "TOKEN_MINT_ADDRESS",
     "transactionSignature": "YOUR_TX_SIGNATURE",
     "expectedAmount": 1.5
+  }'
+```
+
+### Step 7: Create PumpSwap Pool (Optional)
+Once graduated, create the real PumpSwap pool:
+```bash
+curl -X POST "https://x402-fun.onrender.com/api/program/create-pool" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mint": "TOKEN_MINT_ADDRESS",
+    "contributorWallet": "YOUR_WALLET"
   }'
 ```
 
