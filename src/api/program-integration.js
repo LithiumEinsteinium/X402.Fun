@@ -4,13 +4,12 @@
  */
 
 import { Connection, PublicKey, Transaction, SystemProgram, ComputeBudgetProgram, Keypair } from '@solana/web3.js';
+import { getAssociatedTokenAddressSync, createAssociatedTokenAccountInstruction, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, createSyncNativeInstruction, getAccount } from '@solana/spl-token';
 import bs58 from 'bs58';
 
-// Import tokens from tokens.js for syncing
 import { tokens, bondingCurves } from './tokens.js';
 import { announceLaunch, announceGraduation } from '../utils/telegram.js';
 
-// Program configuration
 const PROGRAM_ID = '63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF';
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
 const CLUSTER = process.env.CLUSTER || 'devnet';
@@ -20,16 +19,17 @@ const connection = new Connection(RPC_URL, 'confirmed');
 console.log(`🔗 Connected to ${CLUSTER}`);
 console.log(`📜 Program ID: ${PROGRAM_ID}`);
 
-// Token distribution (like pump.fun)
-const BONDING_CURVE_TOKENS = 0.30; // 30% available for trading
-const POOL_TOKENS = 0.70; // 70% for liquidity
-const PLATFORM_FEE = 0.15; // 15%
-const POOL_FEE = 0.85; // 85%
-const GRADUATION_SOL = 1.5; // Devnet threshold
+const BONDING_CURVE_TOKENS = 0.30;
+const POOL_TOKENS = 0.70;
+const PLATFORM_FEE = 0.15;
+const POOL_FEE = 0.85;
+const GRADUATION_SOL = 1.5;
 
-/**
- * Get platform config
- */
+// PumpSwap and token constants
+const PUMPSWAP_PROGRAM = 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA';
+const WRAPPED_SOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
+const TOKEN_2022 = new PublicKey('TokenzQdBNbLqP5VEhdkAS6tFqe37MFtyb1ZuToBMwExT');
+
 export async function getPlatformConfig(req, res) {
   res.json({
     programId: PROGRAM_ID,
@@ -50,97 +50,86 @@ export async function getPlatformConfig(req, res) {
 
 export async function getNetworkInfo(req, res) {
   try {
+    const version = await connection.getVersion();
+    const health = await connection.getHealth();
+    const slot = await connection.getSlot();
+    
     res.json({
       cluster: CLUSTER,
       rpc: RPC_URL,
       programId: PROGRAM_ID,
-      status: 'connected'
+      status: health ? 'connected' : 'degraded',
+      version: version['solana-core'],
+      slot
     });
   } catch (e) {
-    res.json({ error: e.message });
+    res.status(500).json({ error: e.message });
   }
 }
 
-/**
- * Create launch transaction using our program
- * This creates a real bonding curve
- */
 export async function createLaunchTransaction(req, res) {
   try {
-    const { agentId, name, symbol, uri, creatorWallet } = req.body;
+    const { agentId, name, symbol, creatorWallet, uri } = req.body;
     
-    if (!agentId || !name || !symbol || !creatorWallet) {
-      return res.status(400).json({ 
-        error: 'agentId, name, symbol, and creatorWallet required' 
-      });
+    if (!name || !symbol || !creatorWallet) {
+      return res.status(400).json({ error: 'name, symbol, and creatorWallet required' });
     }
     
-    try {
-      new PublicKey(creatorWallet);
-    } catch {
-      return res.status(400).json({ error: 'Invalid wallet address' });
-    }
+    const mint = Keypair.generate();
+    const mintPubkey = mint.publicKey;
+    const creator = new PublicKey(creatorWallet);
     
-    // Generate mint keypair
-    const seedBytes = new Uint8Array(32);
-    const agentIdBytes = Buffer.from(agentId + Date.now());
-    for (let i = 0; i < 32; i++) {
-      seedBytes[i] = agentIdBytes[i % agentIdBytes.length];
-    }
-    const mintKeypair = Keypair.fromSeed(seedBytes);
-    const mint = mintKeypair.publicKey;
-    
-    // Get recent blockhash
-    const { blockhash } = await connection.getLatestBlockhash();
-    
-    // Create transaction
-    const transaction = new Transaction();
-    transaction.feePayer = new PublicKey(creatorWallet);
-    transaction.recentBlockhash = blockhash;
-    
-    // Add compute budget
-    transaction.add(
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 300000 })
+    const [bondingCurvePubkey] = PublicKey.findProgramAddressSync(
+      [Buffer.from('curve'), mintPubkey.toBuffer()],
+      new PublicKey(PROGRAM_ID)
     );
     
-    /*
-     * REAL IMPLEMENTATION: Call our program
-     * 
-     * In production, we'd use the Anchor IDL to create:
-     * 
-     * 1. Record x402 payment (for agent verification)
-     * 2. Launch token (creates bonding curve)
-     * 
-     * For now, return a template with the program instruction
-     */
+    const [tokenPubkey] = PublicKey.findProgramAddressSync(
+      [Buffer.from('token'), mintPubkey.toBuffer()],
+      new PublicKey(PROGRAM_ID)
+    );
+    
+    const { blockhash } = await connection.getLatestBlockhash();
+    
+    const transaction = new Transaction();
+    transaction.feePayer = creator;
+    transaction.recentBlockhash = blockhash;
+    
+    transaction.add(
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 450000 }),
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 500000 })
+    );
+    
+    transaction.add(
+      SystemProgram.createAccount({
+        fromPubkey: creator,
+        newAccountPubkey: mintPubkey,
+        space: 82,
+        lamports: await connection.getMinimumBalanceForRentExemption(82),
+        programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+      }),
+      SystemProgram.createAccount({
+        fromPubkey: creator,
+        newAccountPubkey: bondingCurvePubkey,
+        space: 1000,
+        lamports: await connection.getMinimumBalanceForRentExemption(1000),
+        programId: new PublicKey(PROGRAM_ID)
+      })
+    );
     
     const transactionBase64 = transaction.serialize({ requireAllSignatures: false }).toString('base64');
     
     console.log(`🚀 Created launch transaction for ${name} (${symbol})`);
-    console.log(`   Mint: ${mint.toBase58()}`);
-    console.log(`   Creator: ${creatorWallet}`);
+    console.log(`   Mint: ${mintPubkey.toBase58()}`);
+    console.log(`   Bonding Curve: ${bondingCurvePubkey.toBase58()}`);
     
     res.json({
       success: true,
-      mint: mint.toBase58(),
-      mintPrivateKey: bs58.encode(mintKeypair.secretKey),
-      name,
-      symbol,
-      uri: uri || '',
-      program: PROGRAM_ID,
-      tokenDistribution: {
-        total: '1,000,000,000,000,000', // 1M tokens with 9 decimals
-        bondingCurve: '30%',
-        liquidityPool: '70%'
-      },
+      mint: mintPubkey.toBase58(),
+      bondingCurve: bondingCurvePubkey.toBase58(),
+      tokenAccount: tokenPubkey.toBase58(),
       transaction: transactionBase64,
-      instructions: [
-        '1. Record x402 payment (agent verification)',
-        '2. Launch token with bonding curve',
-        '3. 30% tokens available for trading',
-        '4. 70% reserved for liquidity pool'
-      ],
-      message: 'Sign this transaction to launch with full bonding curve'
+      message: 'Sign this transaction with your wallet and submit to Solana devnet'
     });
     
   } catch (error) {
@@ -149,20 +138,14 @@ export async function createLaunchTransaction(req, res) {
   }
 }
 
-/**
- * Verify launch - confirm on-chain
- */
 export async function verifyLaunch(req, res) {
   try {
     const { agentId, mint, transactionSignature, name, symbol, creatorWallet } = req.body;
     
-    if (!agentId || !mint || !transactionSignature) {
-      return res.status(400).json({ 
-        error: 'agentId, mint, and transactionSignature required' 
-      });
+    if (!mint || !transactionSignature) {
+      return res.status(400).json({ error: 'mint and transactionSignature required' });
     }
     
-    // Verify transaction
     try {
       const tx = await connection.getParsedTransaction(transactionSignature, {
         maxSupportedTransactionVersion: 0
@@ -173,20 +156,22 @@ export async function verifyLaunch(req, res) {
       }
       
       if (tx.meta?.err) {
-        return res.status(400).json({ error: 'Transaction failed', details: tx.meta.err });
+        return res.status(400).json({ error: 'Transaction failed' });
       }
       
-      console.log(`✅ Token verified on-chain: ${mint}`);
+      const mintPubkey = new PublicKey(mint);
+      const [bondingCurvePubkey] = PublicKey.findProgramAddressSync(
+        [Buffer.from('curve'), mintPubkey.toBuffer()],
+        new PublicKey(PROGRAM_ID)
+      );
       
-      // Save token to backend for display
-      const tokenId = `token_${Date.now()}`;
-      const token = {
-        id: tokenId,
-        mint: mint,
-        name: name || 'Token',
-        symbol: symbol || 'TOKEN',
-        agentId: agentId,
-        creatorWallet: creatorWallet || '',
+      tokens[mint] = {
+        id: `token_${Date.now()}`,
+        mint,
+        name: name || 'Unknown',
+        symbol: symbol || 'UNKNOWN',
+        agentId,
+        creator: creatorWallet || '',
         bondingCurve: {
           liquidity: 0,
           price: 0.000028,
@@ -198,24 +183,29 @@ export async function verifyLaunch(req, res) {
         totalSells: 0
       };
       
-      tokens.set(tokenId, token);
+      bondingCurves[mint] = {
+        mint,
+        bondingCurve: bondingCurvePubkey.toBase58(),
+        complete: false,
+        virtualSolReserves: 0,
+        virtualTokenReserves: 0,
+        realSolReserves: 0,
+        totalSupply: 0,
+        graduated: false
+      };
       
-      // Announce to Telegram
-      announceLaunch({
-        name: token.name,
-        symbol: token.symbol,
-        creator: token.creatorWallet,
-        mint: token.mint
-      });
+      await announceLaunch(tokens[mint]);
+      
+      console.log(`✅ Verified launch: ${mint}`);
       
       res.json({
         success: true,
         verified: true,
         mint,
-        agentId,
-        signature: transactionSignature,
-        message: 'Token launched with bonding curve!',
-        nextStep: 'Contribute SOL to graduate (1.5 SOL needed)'
+        name: name || 'Unknown',
+        symbol: symbol || 'UNKNOWN',
+        bondingCurve: bondingCurvePubkey.toBase58(),
+        message: 'Token launched successfully on devnet!'
       });
       
     } catch (e) {
@@ -228,55 +218,57 @@ export async function verifyLaunch(req, res) {
   }
 }
 
-/**
- * Create contribution transaction
- * Agent contributes SOL to reach graduation threshold
- */
 export async function createContributeTransaction(req, res) {
   try {
     const { mint, contributorWallet, solAmount } = req.body;
     
     if (!mint || !contributorWallet || !solAmount) {
-      return res.status(400).json({ 
-        error: 'mint, contributorWallet, and solAmount required' 
-      });
+      return res.status(400).json({ error: 'mint, contributorWallet, and solAmount required' });
     }
     
-    const platformFee = solAmount * PLATFORM_FEE;
-    const poolAmount = solAmount * POOL_FEE;
+    const mintPubkey = new PublicKey(mint);
+    const contributor = new PublicKey(contributorWallet);
+    
+    const [bondingCurvePubkey] = PublicKey.findProgramAddressSync(
+      [Buffer.from('curve'), mintPubkey.toBuffer()],
+      new PublicKey(PROGRAM_ID)
+    );
+    
+    const amount = Math.ceil(solAmount * 1e9);
+    const platformFee = Math.floor(amount * PLATFORM_FEE);
+    const poolAmount = amount - platformFee;
     
     const { blockhash } = await connection.getLatestBlockhash();
     
     const transaction = new Transaction();
-    transaction.feePayer = new PublicKey(contributorWallet);
+    transaction.feePayer = contributor;
     transaction.recentBlockhash = blockhash;
     
     transaction.add(
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 200000 })
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 300000 })
     );
     
-    // Transfer platform fee
     transaction.add(
       SystemProgram.transfer({
-        fromPubkey: new PublicKey(contributorWallet),
-        toPubkey: new PublicKey('7tZMag1w7P1YyGCbAMCdsrYqgeHMm5EdAzKpDs12mmTR'),
-        lamports: Math.floor(platformFee * 1e9)
+        fromPubkey: contributor,
+        toPubkey: bondingCurvePubkey,
+        lamports: poolAmount
       })
     );
     
     const transactionBase64 = transaction.serialize({ requireAllSignatures: false }).toString('base64');
     
+    console.log(`💰 Created contribution: ${solAmount} SOL for ${mint}`);
+    
     res.json({
       success: true,
       mint,
-      contribution: {
-        total: solAmount,
-        platformFee: platformFee.toFixed(4),
-        poolAmount: poolAmount.toFixed(4),
-        neededForGraduation: GRADUATION_SOL
-      },
+      contributor: contributorWallet,
+      amount: solAmount,
+      platformFee: (platformFee / 1e9).toFixed(4),
+      poolAmount: (poolAmount / 1e9).toFixed(4),
       transaction: transactionBase64,
-      message: `Sign to contribute ${solAmount} SOL (${platformFee.toFixed(4)} fee, ${poolAmount.toFixed(4)} to pool)`
+      message: `Sign to contribute ${solAmount} SOL. ${(platformFee / 1e9).toFixed(4)} SOL platform fee will be deducted.`
     });
     
   } catch (error) {
@@ -285,9 +277,6 @@ export async function createContributeTransaction(req, res) {
   }
 }
 
-/**
- * Verify contribution and graduation
- */
 export async function verifyContribution(req, res) {
   try {
     const { mint, transactionSignature, expectedAmount } = req.body;
@@ -314,6 +303,18 @@ export async function verifyContribution(req, res) {
       const platformFee = expectedAmount * PLATFORM_FEE;
       const poolAmount = expectedAmount * POOL_FEE;
       
+      if (tokens[mint]) {
+        tokens[mint].graduated = expectedAmount >= GRADUATION_SOL;
+        if (bondingCurves[mint]) {
+          bondingCurves[mint].complete = expectedAmount >= GRADUATION_SOL;
+          bondingCurves[mint].graduated = expectedAmount >= GRADUATION_SOL;
+        }
+        
+        if (expectedAmount >= GRADUATION_SOL) {
+          await announceGraduation(tokens[mint]);
+        }
+      }
+      
       res.json({
         success: true,
         verified: true,
@@ -339,14 +340,9 @@ export async function verifyContribution(req, res) {
   }
 }
 
-// PumpSwap program ID
-const PUMPSWAP_PROGRAM = 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA';
-const WRAPPED_SOL_MINT = 'So11111111111111111111111111111111111111112';
-
-
 export async function createPumpSwapPool(req, res) {
   try {
-    const { mint, contributorWallet, poolIndex } = req.body;
+    const { mint, contributorWallet, poolIndex = 0 } = req.body;
     
     if (!mint || !contributorWallet) {
       return res.status(400).json({ 
@@ -355,32 +351,111 @@ export async function createPumpSwapPool(req, res) {
     }
     
     const mintPubkey = new PublicKey(mint);
-    const [bondingCurvePubkey] = PublicKey.findProgramAddressSync(
+    const contributor = new PublicKey(contributorWallet);
+    const programPubkey = new PublicKey(PROGRAM_ID);
+    const pumpswapProgram = new PublicKey(PUMPSWAP_PROGRAM);
+    
+    // Derive PDAs
+    const [bondingCurvePubkey, curveBump] = PublicKey.findProgramAddressSync(
       [Buffer.from('curve'), mintPubkey.toBuffer()],
-      new PublicKey('63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF')
+      programPubkey
     );
+    
+    const [tokenPubkey, tokenBump] = PublicKey.findProgramAddressSync(
+      [Buffer.from('token'), mintPubkey.toBuffer()],
+      programPubkey
+    );
+    
+    // Get PumpSwap PDAs
+    const [poolPubkey] = PublicKey.findProgramAddressSync(
+      [Buffer.from('pool'), Buffer.from([poolIndex, 0]), bondingCurvePubkey.toBuffer(), mintPubkey.toBuffer(), WRAPPED_SOL_MINT.toBuffer()],
+      pumpswapProgram
+    );
+    
+    const [globalConfig] = PublicKey.findProgramAddressSync(
+      [Buffer.from('global_config')],
+      pumpswapProgram
+    );
+    
+    const [eventAuthority] = PublicKey.findProgramAddressSync(
+      [Buffer.from('__event_authority')],
+      pumpswapProgram
+    );
+    
+    // Get ATAs
+    const curveWSOL = getAssociatedTokenAddressSync(
+      WRAPPED_SOL_MINT,
+      bondingCurvePubkey,
+      true,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+    
+    const vaultTokenAccount = getAssociatedTokenAddressSync(
+      mintPubkey,
+      bondingCurvePubkey,
+      true,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+    
+    // Check if WSOL ATA exists
+    let wsolATAExists = false;
+    try {
+      await getAccount(connection, curveWSOL);
+      wsolATAExists = true;
+    } catch (e) {
+      wsolATAExists = false;
+    }
     
     const { blockhash } = await connection.getLatestBlockhash();
     
     const transaction = new Transaction();
-    transaction.feePayer = new PublicKey(contributorWallet);
+    transaction.feePayer = contributor;
     transaction.recentBlockhash = blockhash;
     
     transaction.add(
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 500000 })
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 800000 }),
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1000000 })
     );
+    
+    // Create WSOL ATA if it doesn't exist
+    if (!wsolATAExists) {
+      transaction.add(
+        createAssociatedTokenAccountInstruction(
+          contributor,
+          curveWSOL,
+          bondingCurvePubkey,
+          WRAPPED_SOL_MINT,
+          TOKEN_2022_PROGRAM_ID,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
+      );
+    }
+    
+    // Create CPI instruction data for graduate_to_pumpswap
+    // This would call our program which then calls PumpSwap
+    // For now, we build a simplified version
     
     const transactionBase64 = transaction.serialize({ requireAllSignatures: false }).toString('base64');
     
-    console.log(`🏊 Creating PumpSwap pool for ${mint}`);
+    console.log(`🏊 Pool creation for ${mint}`);
+    console.log(`   Bonding curve: ${bondingCurvePubkey.toBase58()}`);
+    console.log(`   Pool: ${poolPubkey.toBase58()}`);
+    console.log(`   WSOL ATA exists: ${wsolATAExists}`);
     
     res.json({
       success: true,
       mint,
       bondingCurve: bondingCurvePubkey.toBase58(),
-      poolIndex: poolIndex || 0,
+      pool: poolPubkey.toBase58(),
+      poolIndex,
+      wsolATA: curveWSOL.toBase58(),
+      vaultTokenAccount: vaultTokenAccount.toBase58(),
+      globalConfig: globalConfig.toBase58(),
       transaction: transactionBase64,
-      note: 'Sign and submit to create PumpSwap pool'
+      message: 'Transaction ready. Sign and submit to create PumpSwap pool.',
+      note: 'This creates ATAs. Full graduate_to_pumpswap CPI coming soon.'
     });
     
   } catch (error) {
