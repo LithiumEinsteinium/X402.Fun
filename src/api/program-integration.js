@@ -369,7 +369,7 @@ export async function createPumpSwapPool(req, res) {
     
     // Get PumpSwap PDAs
     const [poolPubkey] = PublicKey.findProgramAddressSync(
-      [Buffer.from('pool'), Buffer.from([poolIndex, 0]), bondingCurvePubkey.toBuffer(), mintPubkey.toBuffer(), WRAPPED_SOL_MINT.toBuffer()],
+      [Buffer.from('pool'), Buffer.from([poolIndex, 0]), bondingCurvePubkey.toBuffer(), mintPubkey.toBuffer(), new PublicKey(WRAPPED_SOL_MINT_STR).toBuffer()],
       pumpswapProgram
     );
     
