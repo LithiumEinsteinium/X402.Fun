@@ -55,6 +55,7 @@ app.post('/api/program/verify-launch', program.verifyLaunch);
 app.post('/api/program/create-contribute', program.createContributeTransaction);
 app.post('/api/program/verify-contribute', program.verifyContribution);
 app.post('/api/program/create-pool', program.createPumpSwapPool);
+app.post('/api/program/create-buy', program.createBuyTransaction);
 
 // PumpFun SDK integration (real bonding curve)
 app.get('/api/pumpfun/config', pumpfun.getPlatformConfig);

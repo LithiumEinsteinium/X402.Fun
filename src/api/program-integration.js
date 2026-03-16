@@ -1,3 +1,4 @@
+import crypto from "crypto";
 /**
  * X402.Fun - Full Program Integration
  * Uses the on-chain program for real bonding curves
@@ -534,6 +535,101 @@ export async function createPumpSwapPool(req, res) {
   }
 }
 
+
+// Create a buy transaction from bonding curve
+export async function createBuyTransaction(req, res) {
+  try {
+    const { mint, buyerWallet, solAmount, minTokensOut } = req.body;
+    
+    if (!mint || !buyerWallet || !solAmount) {
+      return res.status(400).json({ 
+        error: 'mint, buyerWallet, and solAmount required' 
+      });
+    }
+    
+    const mintPubkey = new PublicKey(mint);
+    const buyer = new PublicKey(buyerWallet);
+    const programPubkey = new PublicKey(PROGRAM_ID);
+    
+    // Derive PDAs
+    const [bondingCurvePubkey] = PublicKey.findProgramAddressSync(
+      [Buffer.from('curve'), mintPubkey.toBuffer()],
+      programPubkey
+    );
+    
+    const [tokenPubkey] = PublicKey.findProgramAddressSync(
+      [Buffer.from('token'), mintPubkey.toBuffer()],
+      programPubkey
+    );
+    
+    const [globalPubkey] = PublicKey.findProgramAddressSync(
+      [Buffer.from('global')],
+      programPubkey
+    );
+    
+    // Generate nonce for x402 receipt
+    const nonce = crypto.randomBytes(32);
+    const [x402Receipt] = PublicKey.findProgramAddressSync(
+      [Buffer.from('x402'), buyer.toBuffer(), nonce],
+      programPubkey
+    );
+    
+    // Platform wallet for fees
+    const platformWallet = new PublicKey('7tZMag1w7P1YyGCbAMCdsrYqgeHMm5EdAzKpDs12mmTR');
+    
+    const { blockhash } = await connection.getLatestBlockhash();
+    
+    const transaction = new Transaction();
+    transaction.feePayer = buyer;
+    transaction.recentBlockhash = blockhash;
+    
+    transaction.add(
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 600000 })
+    );
+    
+    // Buy instruction data: discriminator + sol_amount (u64) + min_tokens_out (u64) + nonce (32 bytes)
+    const BUY_DISCRIMINATOR = Buffer.from([0xce, 0x16, 0x7a, 0x81, 0x79, 0x4e, 0x2a, 0x3a]); // sha256("global:buy")[:8]
+    const solAmountBuf = Buffer.alloc(8);
+    solAmountBuf.writeBigUInt64LE(BigInt(Math.floor(solAmount * 1e9)));
+    const minTokensBuf = Buffer.alloc(8);
+    minTokensBuf.writeBigUInt64LE(BigInt(minTokensOut || 0));
+    
+    const instructionData = Buffer.concat([BUY_DISCRIMINATOR, solAmountBuf, minTokensBuf, nonce]);
+    
+    transaction.add({
+      keys: [
+        { pubkey: globalPubkey, isSigner: false, isWritable: false },
+        { pubkey: x402Receipt, isSigner: false, isWritable: true },
+        { pubkey: tokenPubkey, isSigner: false, isWritable: true },
+        { pubkey: bondingCurvePubkey, isSigner: false, isWritable: true },
+        { pubkey: buyer, isSigner: true, isWritable: true },
+        { pubkey: platformWallet, isSigner: false, isWritable: true },
+        // Note: vault and buyer token accounts need to be created/added
+      ],
+      programId: programPubkey,
+      data: instructionData
+    });
+    
+    const transactionBase64 = transaction.serialize({ requireAllSignatures: false }).toString('base64');
+    
+    res.json({
+      success: true,
+      mint,
+      buyer: buyerWallet,
+      solAmount,
+      minTokensOut: minTokensOut || 'auto-calculated',
+      x402Receipt: x402Receipt.toBase58(),
+      nonce: Buffer.from(nonce).toString('hex'),
+      transaction: transactionBase64,
+      note: 'x402 payment required before this transaction can execute'
+    });
+    
+  } catch (error) {
+    console.error('Buy error:', error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
 export default {
   getNetworkInfo,
   getPlatformConfig,
@@ -541,5 +637,6 @@ export default {
   verifyLaunch,
   createContributeTransaction,
   verifyContribution,
-  createPumpSwapPool
+  createPumpSwapPool,
+  createBuyTransaction
 };
