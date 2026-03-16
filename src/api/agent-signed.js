@@ -73,10 +73,14 @@ export async function createLaunchTransaction(req, res) {
       return res.status(400).json({ error: 'Invalid creator wallet address' });
     }
     
-    // Generate a deterministic mint address based on agentId
-    // In production, this would be created by the program
-    const mintSeed = Buffer.from(agentId + Date.now()).slice(0, 32);
-    const mintKeypair = Keypair.fromSeed(mintSeed);
+    // Generate a deterministic mint keypair based on agentId
+    // This creates a reproducible mint address
+    const seedBytes = new Uint8Array(32);
+    const agentIdBytes = Buffer.from(agentId + Date.now());
+    for (let i = 0; i < 32; i++) {
+      seedBytes[i] = agentIdBytes[i % agentIdBytes.length];
+    }
+    const mintKeypair = Keypair.fromSeed(seedBytes);
     const mint = mintKeypair.publicKey;
     
     // Get recent blockhash
