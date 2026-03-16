@@ -39,13 +39,22 @@ import tokens from './api/tokens.js';
 import x402 from './api/x402.js';
 import pumpswap from './api/pumpswap.js';
 import agentSigned from './api/agent-signed.js';
+import program from './api/program-integration.js';
 
 app.post('/api/agents/register', agents.registerAgent);
 app.get('/api/agents/:id', agents.getAgent);
 app.post('/api/agents/verify', agents.verifyAgent);
 app.get('/api/agents', agents.listAgents);
 
-// Agent-signed endpoints (for decentralized launches)
+// Full program integration (with real bonding curve)
+app.get('/api/program/config', program.getPlatformConfig);
+app.get('/api/program/network', program.getNetworkInfo);
+app.post('/api/program/create-launch', program.createLaunchTransaction);
+app.post('/api/program/verify-launch', program.verifyLaunch);
+app.post('/api/program/create-contribute', program.createContributeTransaction);
+app.post('/api/program/verify-contribute', program.verifyContribution);
+
+// Agent-signed endpoints (legacy)
 app.get('/api/agent/config', agentSigned.getPlatformConfig);
 app.post('/api/agent/create-launch', agentSigned.createLaunchTransaction);
 app.post('/api/agent/verify-launch', agentSigned.verifyLaunch);
