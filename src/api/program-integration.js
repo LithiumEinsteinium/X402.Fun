@@ -25,10 +25,11 @@ const PLATFORM_FEE = 0.15;
 const POOL_FEE = 0.85;
 const GRADUATION_SOL = 1.5;
 
-// PumpSwap and token constants
+// PumpSwap and token constants (as strings, converted to PublicKey when needed)
 const PUMPSWAP_PROGRAM = 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA';
-const WRAPPED_SOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
-const TOKEN_2022 = new PublicKey('TokenzQdBNbLqP5VEhdkAS6tFqe37MFtyb1ZuToBMwExT');
+const WRAPPED_SOL_MINT_STR = 'So11111111111111111111111111111111111111112';
+const TOKEN_2022_STR = 'TokenzQdBNbLqP5VEhdkAS6tFqe37MFtyb1ZuToBMwExT';
+const TOKEN_PROGRAM_STR = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 
 export async function getPlatformConfig(req, res) {
   res.json({
@@ -106,7 +107,7 @@ export async function createLaunchTransaction(req, res) {
         newAccountPubkey: mintPubkey,
         space: 82,
         lamports: await connection.getMinimumBalanceForRentExemption(82),
-        programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+        programId: new PublicKey(TOKEN_PROGRAM_STR)
       }),
       SystemProgram.createAccount({
         fromPubkey: creator,
@@ -406,7 +407,7 @@ export async function createPumpSwapPool(req, res) {
     );
     
     const poolQuoteToken = getAssociatedTokenAddressSync(
-      WRAPPED_SOL_MINT,
+      new PublicKey(WRAPPED_SOL_MINT_STR),
       poolPubkey,
       true,
       TOKEN_2022_PROGRAM_ID,
@@ -443,7 +444,7 @@ export async function createPumpSwapPool(req, res) {
           contributor,
           curveWSOL,
           bondingCurvePubkey,
-          WRAPPED_SOL_MINT,
+          new PublicKey(WRAPPED_SOL_MINT_STR),
           TOKEN_2022_PROGRAM_ID,
           ASSOCIATED_TOKEN_PROGRAM_ID
         )
@@ -486,11 +487,11 @@ export async function createPumpSwapPool(req, res) {
         { pubkey: poolQuoteToken, isSigner: false, isWritable: true },
         { pubkey: globalConfig, isSigner: false, isWritable: false },
         { pubkey: eventAuthority, isSigner: false, isWritable: false },
-        { pubkey: WRAPPED_SOL_MINT, isSigner: false, isWritable: false },
+        { pubkey: new PublicKey(WRAPPED_SOL_MINT_STR), isSigner: false, isWritable: false },
         { pubkey: pumpswapProgram, isSigner: false, isWritable: false },
-        { pubkey: TOKEN_2022, isSigner: false, isWritable: false },
-        { pubkey: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'), isSigner: false, isWritable: false },
-        { pubkey: WRAPPED_SOL_MINT, isSigner: false, isWritable: false },
+        { pubkey: new PublicKey(TOKEN_2022_STR), isSigner: false, isWritable: false },
+        { pubkey: new PublicKey(TOKEN_PROGRAM_STR), isSigner: false, isWritable: false },
+        { pubkey: new PublicKey(WRAPPED_SOL_MINT_STR), isSigner: false, isWritable: false },
         { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
       ],
