@@ -8,6 +8,7 @@ import bs58 from 'bs58';
 
 // Import tokens from tokens.js for syncing
 import { tokens, bondingCurves } from './tokens.js';
+import { announceLaunch, announceGraduation } from '../utils/telegram.js';
 
 // Program configuration
 const PROGRAM_ID = '63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF';
@@ -198,6 +199,14 @@ export async function verifyLaunch(req, res) {
       };
       
       tokens.set(tokenId, token);
+      
+      // Announce to Telegram
+      announceLaunch({
+        name: token.name,
+        symbol: token.symbol,
+        creator: token.creatorWallet,
+        mint: token.mint
+      });
       
       res.json({
         success: true,
