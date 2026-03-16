@@ -15,6 +15,7 @@ function toJSON(obj) {
   );
 }
 
+
 function toJSONParse(jsonString) {
   return JSON.parse(jsonString, (key, value) => {
     if (typeof value === 'string' && /^\d+n$/.test(value)) {
@@ -23,6 +24,7 @@ function toJSONParse(jsonString) {
     return value;
   });
 }
+
 
 /**
  * Convert BigInt values to strings in response
@@ -40,6 +42,8 @@ function sanitizeForJSON(obj) {
   }
   return obj;
 }
+
+
 const PLATFORM_FEE = 0.01;
 
 // Mode: 'simulation' | 'onchain'
@@ -60,6 +64,7 @@ function generateMintAddress() {
   }
   return result;
 }
+
 
 /**
  * Launch a new token
@@ -222,6 +227,7 @@ export async function launchToken(req, res) {
   }
 }
 
+
 /**
  * Get all tokens
  */
@@ -264,6 +270,7 @@ export async function listTokens(req, res) {
   }
 }
 
+
 /**
  * Get single token
  */
@@ -297,6 +304,7 @@ export async function getToken(req, res) {
     res.status(500).json({ error: error.message });
   }
 }
+
 
 /**
  * Contribute liquidity (simulated for now)
@@ -361,6 +369,7 @@ export async function contributeLiquidity(req, res) {
   }
 }
 
+
 /**
  * Add collaborator
  */
@@ -389,6 +398,7 @@ export async function addCollaborator(req, res) {
     res.status(500).json({ error: error.message });
   }
 }
+
 
 /**
  * Buy tokens (placeholder - would need real swap logic)
@@ -425,6 +435,7 @@ export async function buyTokens(req, res) {
   }
 }
 
+
 /**
  * Sell tokens (placeholder - would need real swap logic)
  */
@@ -460,6 +471,7 @@ export async function sellTokens(req, res) {
     res.status(500).json({ error: error.message });
   }
 }
+
 
 export default {
   launchToken,
