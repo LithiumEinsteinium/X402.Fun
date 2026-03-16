@@ -7,7 +7,7 @@ import { Connection, PublicKey, Transaction, SystemProgram, ComputeBudgetProgram
 import bs58 from 'bs58';
 
 // Import tokens from tokens.js for syncing
-import { tokens, bondingCurves } from './tokens.js';
+import { tokens, bondingCurves } from './tokens.js';;
 import { announceLaunch, announceGraduation } from '../utils/telegram.js';
 
 // Program configuration

@@ -13,6 +13,8 @@ const MODE = process.env.MODE || 'simulation';
 const tokens = new Map();
 const bondingCurves = new Map();
 
+export { tokens, bondingCurves };
+
 function generateMintAddress() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   let result = '';
