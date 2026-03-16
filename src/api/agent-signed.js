@@ -9,6 +9,8 @@ import bs58 from 'bs58';
 const PROGRAM_ID = process.env.PROGRAM_ID || '63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF';
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
 const PLATFORM_FEE_PERCENT = 0.15; // 15% platform fee
+const BONDING_CURVE_PERCENT = 0.30; // 30% for bonding curve (buyers)
+const POOL_PERCENT = 0.70; // 70% for liquidity pool
 
 const connection = new Connection(RPC_URL, 'confirmed');
 
@@ -23,10 +25,21 @@ export async function getPlatformConfig(req, res) {
     programId: PROGRAM_ID,
     cluster: process.env.CLUSTER || 'devnet',
     graduationThreshold: process.env.CLUSTER === 'mainnet' ? '69' : '1.5',
-    feePercent: PLATFORM_FEE_PERCENT * 100,
-    poolPercent: (1 - PLATFORM_FEE_PERCENT) * 100,
+    fees: {
+      platform: PLATFORM_FEE_PERCENT * 100,
+      bondingCurve: BONDING_CURVE_PERCENT * 100,
+      liquidityPool: POOL_PERCENT * 100
+    },
+    tokenSplit: {
+      availableForPurchase: '30%',
+      reservedForLiquidity: '70%'
+    },
+    solSplit: {
+      platformFee: '15%',
+      liquidityPool: '85%'
+    },
     mode: 'agent-signed',
-    tokenType: 'SPL Token + Liquidity Pool'
+    tokenType: 'SPL Token with Bonding Curve'
   });
 }
 
