@@ -1,22 +1,34 @@
-# X402.Fun Agent Token Launch Instructions
+# X402.Fun Agent Launch Instructions
 
 ## Overview
-Use X402.Fun API to launch a meme token on Solana Devnet. The agent pays 0.25 SOL to launch.
+Use X402.Fun API to launch a meme token on Solana. The agent pays 0.25 SOL to launch.
 
 ## Base URL
 ```
 https://x402-fun.onrender.com
 ```
 
+## Program Info
+- **Program ID**: `63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF`
+- **Cluster**: Devnet
+
+## Token Distribution
+- **30%** of tokens → Bonding curve (buyable)
+- **70%** of tokens → Reserved for liquidity pool
+
+## Fee Distribution
+- **Platform**: 1%
+- **Creator**: 2%
+- **Graduation**: 1.5 SOL (devnet)
+
 ## Step-by-Step Process
 
-### Step 1: Verify Payment
-Before launching, call the price endpoint to get payment info:
+### Step 1: Get Payment Info
 ```bash
 curl "https://x402-fun.onrender.com/api/x402/price?action=launch"
 ```
 
-Expected response:
+Response:
 ```json
 {
   "action": "launch",
@@ -26,18 +38,9 @@ Expected response:
 }
 ```
 
-### Step 2: Pay the Launch Fee
-Send 0.25 SOL to the platform wallet:
-```
-7tZMag1w7P1YyGCbAMCdsrYqgeHMm5EdAzKpDs12mmTR
-```
-
-(For devnet, you can skip this step - it's bypassed for testing)
-
-### Step 3: Create the Token (Get Unsigned Transaction)
-Call the launch endpoint:
+### Step 2: Create Launch Transaction
 ```bash
-curl -X POST "https://x402-fun.onrender.com/api/agent/create-launch" \
+curl -X POST "https://x402-fun.onrender.com/api/program/create-launch" \
   -H "Content-Type: application/json" \
   -d '{
     "agentId": "your-agent-name",
@@ -47,125 +50,50 @@ curl -X POST "https://x402-fun.onrender.com/api/agent/create-launch" \
   }'
 ```
 
-**Parameters:**
-- `agentId`: Your unique agent identifier (e.g., "ai-trader-001")
-- `name`: Token name (e.g., "SolAI")
-- `symbol`: Token symbol (e.g., "SAI")
-- `creatorWallet`: Your Solana wallet address (must have devnet SOL)
-
-**Response:**
-```json
-{
-  "success": true,
-  "mint": "TOKEN_MINT_ADDRESS",
-  "mintPrivateKey": "PRIVATE_KEY_BASE58",
-  "name": "Your Token Name",
-  "symbol": "SYMBOL",
-  "transaction": "BASE64_ENCODED_TRANSACTION",
-  "instructions": ["..."],
-  "message": "Sign this transaction..."
-}
-```
-
-### Step 4: Sign and Submit the Transaction
+### Step 3: Sign and Submit Transaction
 Use your Solana wallet to sign the transaction and submit to Solana devnet.
 
-**Using Node.js:**
-```javascript
-import { Connection, Transaction, Keypair, PublicKey } from '@solana/web3.js';
-
-// Your wallet (import private key)
-const wallet = Keypair.fromSecretKey(
-  Buffer.from(YOUR_PRIVATE_KEY, 'base64')
-);
-
-// Decode transaction
-const transaction = Transaction.from(
-  Buffer.from(TRANSACTION_BASE64, 'base64')
-);
-
-// Connect to devnet
-const connection = new Connection('https://api.devnet.solana.com');
-
-// Sign and send
-const signature = await connection.sendTransaction(transaction, [wallet]);
-
-console.log('Transaction signature:', signature);
-```
-
-### Step 5: Verify the Launch
+### Step 4: Verify Launch
 ```bash
-curl -X POST "https://x402-fun.onrender.com/api/agent/verify-launch" \
+curl -X POST "https://x402-fun.onrender.com/api/program/verify-launch" \
   -H "Content-Type: application/json" \
   -d '{
     "agentId": "your-agent-name",
-    "mint": "TOKEN_MINT_ADDRESS_FROM_STEP_3",
-    "transactionSignature": "YOUR_TRANSACTION_SIGNATURE"
+    "mint": "TOKEN_MINT_ADDRESS",
+    "transactionSignature": "YOUR_TX_SIGNATURE"
   }'
 ```
 
-## Example Complete Script
-
-```javascript
-const BASE_URL = 'https://x402-fun.onrender.com';
-
-// Your agent info
-const AGENT_ID = 'my-agent-001';
-const WALLET_ADDRESS = 'YOUR_WALLET_ADDRESS';
-const WALLET_PRIVATE_KEY = 'YOUR_PRIVATE_KEY_IN_BASE58';
-
-async function launchToken() {
-  // Step 1: Get payment info
-  const priceRes = await fetch(`${BASE_URL}/api/x402/price?action=launch`);
-  const price = await priceRes.json();
-  console.log('Launch fee:', price);
-
-  // Step 2: Get launch transaction
-  const launchRes = await fetch(`${BASE_URL}/api/agent/create-launch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      agentId: AGENT_ID,
-      name: 'My AI Token',
-      symbol: 'MAI',
-      creatorWallet: WALLET_ADDRESS
-    })
-  });
-  
-  const launchData = await launchRes.json();
-  console.log('Launch response:', launchData);
-  
-  // Step 3: Sign and submit (requires wallet library)
-  // ... sign with Phantom/Solflare ...
-  
-  // Step 4: Verify
-  const verifyRes = await fetch(`${BASE_URL}/api/agent/verify-launch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      agentId: AGENT_ID,
-      mint: launchData.mint,
-      transactionSignature: 'YOUR_TX_SIG'
-    })
-  });
-  
-  const verifyData = await verifyRes.json();
-  console.log('Verification:', verifyData);
-}
-
-launchToken();
+### Step 5: Contribute Liquidity (Graduate)
+```bash
+curl -X POST "https://x402-fun.onrender.com/api/program/create-contribute" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mint": "TOKEN_MINT_ADDRESS",
+    "contributorWallet": "YOUR_WALLET",
+    "solAmount": 1.5
+  }'
 ```
 
+### Step 6: Verify Graduation
+```bash
+curl -X POST "https://x402-fun.onrender.com/api/program/verify-contribute" \
+  -H "Content-Type": application/json" \
+  -d '{
+    "mint": "TOKEN_MINT_ADDRESS",
+    "transactionSignature": "YOUR_TX_SIGNATURE",
+    "expectedAmount": 1.5
+  }'
+```
+
+## Requirements
+- Devnet SOL: https://faucet.solana.com/
+- Solana wallet (Phantom, Solflare, etc.)
+
 ## Important Notes
-
-1. **Devnet Only**: This currently works on devnet. Mainnet deployment coming soon.
-
-2. **Wallet**: You need a Solana wallet with devnet SOL. Get some from:
-   https://faucet.solana.com/
-
-3. **Private Key**: The API returns a mint private key. KEEP IT SAFE - this controls your token!
-
-4. **Token Supply**: The launch creates 1000 tokens (6 decimals) sent to your wallet.
+1. **Devnet Only**: Currently testing on devnet
+2. **Wallet**: You need a Solana wallet with devnet SOL
+3. **Token Split**: 30% buyable, 70% for liquidity pool
 
 ## Contract Info
 - **Program ID**: `63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF`
