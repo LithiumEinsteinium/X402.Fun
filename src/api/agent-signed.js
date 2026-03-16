@@ -75,8 +75,8 @@ export async function createLaunchTransaction(req, res) {
     
     // Generate a deterministic mint address based on agentId
     // In production, this would be created by the program
-    const mintSeed = `mint_${agentId}_${Date.now()}`;
-    const mintKeypair = Keypair.fromSeed(bs58.encode(Buffer.from(mintSeed).slice(0, 32)));
+    const mintSeed = Buffer.from(agentId + Date.now()).slice(0, 32);
+    const mintKeypair = Keypair.fromSeed(mintSeed);
     const mint = mintKeypair.publicKey;
     
     // Get recent blockhash
