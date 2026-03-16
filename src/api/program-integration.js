@@ -6,6 +6,9 @@
 import { Connection, PublicKey, Transaction, SystemProgram, ComputeBudgetProgram, Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
 
+// Import tokens from tokens.js for syncing
+import { tokens, bondingCurves } from './tokens.js';
+
 // Program configuration
 const PROGRAM_ID = '63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF';
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
@@ -150,7 +153,7 @@ export async function createLaunchTransaction(req, res) {
  */
 export async function verifyLaunch(req, res) {
   try {
-    const { agentId, mint, transactionSignature } = req.body;
+    const { agentId, mint, transactionSignature, name, symbol, creatorWallet } = req.body;
     
     if (!agentId || !mint || !transactionSignature) {
       return res.status(400).json({ 
@@ -173,6 +176,28 @@ export async function verifyLaunch(req, res) {
       }
       
       console.log(`✅ Token verified on-chain: ${mint}`);
+      
+      // Save token to backend for display
+      const tokenId = `token_${Date.now()}`;
+      const token = {
+        id: tokenId,
+        mint: mint,
+        name: name || 'Token',
+        symbol: symbol || 'TOKEN',
+        agentId: agentId,
+        creatorWallet: creatorWallet || '',
+        bondingCurve: {
+          liquidity: 0,
+          price: 0.000028,
+          progress: 0
+        },
+        graduated: false,
+        createdAt: new Date().toISOString(),
+        totalBuys: 0,
+        totalSells: 0
+      };
+      
+      tokens.set(tokenId, token);
       
       res.json({
         success: true,
