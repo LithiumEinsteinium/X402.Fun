@@ -71,6 +71,15 @@ export async function createLaunchTransaction(req, res) {
     
     // Create transaction
     const transaction = new Transaction();
+    transaction.feePayer = new PublicKey(creatorWallet);
+    
+    // Get recent blockhash
+    try {
+      const { blockhash } = await connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+    } catch (e) {
+      console.log('Could not get blockhash:', e.message);
+    }
     
     // Add compute budget
     transaction.add(
