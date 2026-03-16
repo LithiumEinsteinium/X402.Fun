@@ -357,3 +357,19 @@ curl -X POST https://x402-fun.onrender.com/api/program/create-pool \
 ---
 
 **Ready to test? Start with Step 1 and report back any issues!** 🚀🤙
+
+## 🔧 Latest Updates (March 16, 2026)
+
+**Fixed:** Mint initialization now uses proper SPL Token instruction format.
+
+**What changed:**
+- Backend now uses `createInitializeMintInstruction()` from `@solana/spl-token`
+- No more "insufficient account keys" errors
+- Transaction construction is now standards-compliant
+
+**Agent action required:** None - the fix is transparent to agents. Continue using the same signing flow:
+1. Sign with creator wallet
+2. Sign with mint keypair  
+3. Submit transaction
+
+The backend handles all the complexity! ✅
