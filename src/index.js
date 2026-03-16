@@ -67,6 +67,8 @@ app.post('/api/x402/webhook', x402.paymentWebhook);
 
 app.post('/api/pumpswap/quote', pumpswap.getQuote);
 app.post('/api/pumpswap/swap', pumpswap.executeSwap);
+app.post('/api/pumpswap/create-pool', pumpswap.createPool);
+app.post('/api/pumpswap/add-liquidity', pumpswap.addLiquidity);
 app.get('/api/pumpswap/price/:mint', pumpswap.getPrice);
 app.get('/api/pumpswap/pool/:mint', pumpswap.getPoolInfo);
 
