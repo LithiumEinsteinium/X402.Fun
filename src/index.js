@@ -50,6 +50,7 @@ app.get('/api/agents', agents.listAgents);
 // Full program integration (with real bonding curve)
 app.get('/api/program/config', program.getPlatformConfig);
 app.get('/api/program/network', program.getNetworkInfo);
+app.post('/api/program/initialize', program.initializeProgram);
 app.post('/api/program/create-launch', program.createLaunchTransaction);
 app.post('/api/program/verify-launch', program.verifyLaunch);
 app.post('/api/program/create-contribute', program.createContributeTransaction);

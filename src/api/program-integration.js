@@ -663,6 +663,80 @@ export async function createSellTransaction(req, res) {
  } catch (error) { console.error("Sell error:", error); res.status(500).json({ error: error.message }); }
 }
 
+
+
+/**
+ * Initialize the program (one-time setup)
+ */
+export async function initializeProgram(req, res) {
+ try {
+ const { authority, feeRecipient } = req.body;
+ 
+ if (!authority || !feeRecipient) {
+ return res.status(400).json({ 
+ error: 'authority and feeRecipient wallet addresses required' 
+ });
+ }
+ 
+ const authorityPubkey = new PublicKey(authority);
+ const feeRecipientPubkey = new PublicKey(feeRecipient);
+ 
+ // Derive global PDA
+ const [globalPubkey] = PublicKey.findProgramAddressSync(
+ [Buffer.from('global')],
+ new PublicKey(PROGRAM_ID)
+ );
+ 
+ const { blockhash } = await connection.getLatestBlockhash();
+ 
+ const transaction = new Transaction();
+ transaction.feePayer = authorityPubkey;
+ transaction.recentBlockhash = blockhash;
+ 
+ transaction.add(
+ ComputeBudgetProgram.setComputeUnitLimit({ units: 400000 })
+ );
+ 
+ // Initialize instruction discriminator: sha256("global:initialize")[:8]
+ const INITIALIZE_DISCRIMINATOR = Buffer.from([10, 128, 86, 171, 3, 137, 161, 244]);
+ 
+ const instructionData = Buffer.concat([
+ INITIALIZE_DISCRIMINATOR,
+ authorityPubkey.toBuffer(),
+ feeRecipientPubkey.toBuffer()
+ ]);
+ 
+ transaction.add({
+ keys: [
+ { pubkey: globalPubkey, isSigner: false, isWritable: true },
+ { pubkey: authorityPubkey, isSigner: true, isWritable: true },
+ { pubkey: feeRecipientPubkey, isSigner: false, isWritable: false },
+ { pubkey: new PublicKey(SYSTEM_PROGRAM_ID), isSigner: false, isWritable: false },
+ ],
+ programId: new PublicKey(PROGRAM_ID),
+ data: instructionData
+ });
+ 
+ const transactionBase64 = transaction.serialize({ requireAllSignatures: false }).toString('base64');
+ 
+ console.log(`🔐 Created program initialization transaction`);
+ console.log(` Global: ${globalPubkey.toBase58()}`);
+ 
+ res.json({
+ success: true,
+ global: globalPubkey.toBase58(),
+ authority: authority,
+ feeRecipient: feeRecipient,
+ transaction: transactionBase64,
+ message: 'Sign this transaction to initialize the X402.Fun program (one-time only)'
+ });
+ 
+ } catch (error) {
+ console.error('Initialize error:', error);
+ res.status(500).json({ error: error.message });
+ }
+}
+
 export default {
   getNetworkInfo,
   getPlatformConfig,
