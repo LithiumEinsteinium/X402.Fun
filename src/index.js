@@ -37,6 +37,7 @@ app.get('/network', (req, res) => {
 import agents from './api/agents.js';
 import tokens from './api/tokens.js';
 import x402 from './api/x402.js';
+import x402Integration from './api/x402-integration.js';
 import pumpswap from './api/pumpswap.js';
 import agentSigned from './api/agent-signed.js';
 import program from './api/program-integration.js';
@@ -87,6 +88,9 @@ app.get('/api/x402/price', x402.getPrice);
 app.post('/api/x402/verify', x402.verifyPayment);
 app.post('/api/x402/create', x402.createPaymentRequest);
 app.post('/api/x402/webhook', x402.paymentWebhook);
+app.get('/api/x402-integration/price', x402Integration.getPrice);
+app.post('/api/x402-integration/create', x402Integration.createPaymentRequest);
+app.post('/api/x402-integration/verify', x402Integration.verifyPayment);
 
 app.post('/api/pumpswap/quote', pumpswap.getQuote);
 app.post('/api/pumpswap/swap', pumpswap.executeSwap);
