@@ -20,7 +20,17 @@ app.use(express.json());
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'X402.Fun' });
+  res.json({ 
+    status: 'ok', 
+    service: 'X402.Fun',
+    mode: process.env.MODE || 'simulation'
+  });
+});
+
+// Network info endpoint
+app.get('/network', (req, res) => {
+  const solana = require('./utils/solana.js');
+  res.json(solana.getNetworkInfo());
 });
 
 // API Routes
