@@ -30,7 +30,7 @@ console.log(`📜 Program ID: ${PROGRAM_ID}`);
 /**
  * Get or create a keypair from base58 private key
  */
-export function getKeypairFromEnv(keyName: string): Keypair | null {
+export function getKeypairFromEnv(keyName) {
   const privateKeyBase58 = process.env[keyName];
   if (!privateKeyBase58) {
     console.log(`⚠️  ${keyName} not set in environment`);
@@ -48,7 +48,7 @@ export function getKeypairFromEnv(keyName: string): Keypair | null {
 /**
  * Get the platform wallet (for receiving fees)
  */
-export function getPlatformWallet(): PublicKey | null {
+export function getPlatformWallet() {
   const walletBase58 = process.env.PLATFORM_WALLET;
   if (!walletBase58) return null;
   try {
@@ -61,14 +61,14 @@ export function getPlatformWallet(): PublicKey | null {
 /**
  * Create a new mint keypair for a token
  */
-export function createMintKeypair(): Keypair {
+export function createMintKeypair() {
   return Keypair.generate();
 }
 
 /**
  * Get the mint address from a token launch transaction
  */
-export async function getMintFromTransaction(signature: string): Promise<string | null> {
+export async function getMintFromTransaction(signature) {
   try {
     const tx = await connection.getParsedTransaction(signature, {
       maxSupportedTransactionVersion: 0
@@ -76,11 +76,9 @@ export async function getMintFromTransaction(signature: string): Promise<string 
     
     if (!tx) return null;
     
-    // Find the mint in the transaction logs or token info
-    // This is simplified - in production you'd parse more carefully
+    // Find the mint in the transaction logs
     for (const log of tx.meta?.logMessages || []) {
       if (log.includes('InitializeMint')) {
-        // Extract mint address from logs
         const match = log.match(/InitializeMint\s+(\w+)/);
         if (match) return match[1];
       }
@@ -96,7 +94,7 @@ export async function getMintFromTransaction(signature: string): Promise<string 
 /**
  * Get account info for debugging
  */
-export async function getAccountInfo(address: string) {
+export async function getAccountInfo(address) {
   try {
     const pubkey = new PublicKey(address);
     const info = await connection.getParsedAccountInfo(pubkey);
@@ -123,7 +121,7 @@ export async function getProgramAccounts() {
 /**
  * Get token balance for an address
  */
-export async function getTokenBalance(mintAddress: string, walletAddress: string): Promise<number> {
+export async function getTokenBalance(mintAddress, walletAddress) {
   try {
     const mint = new PublicKey(mintAddress);
     const wallet = new PublicKey(walletAddress);
@@ -145,11 +143,11 @@ export async function getTokenBalance(mintAddress: string, walletAddress: string
 /**
  * Get SOL balance
  */
-export async function getSolBalance(address: string): Promise<number> {
+export async function getSolBalance(address) {
   try {
     const pubkey = new PublicKey(address);
     const balance = await connection.getBalance(pubkey);
-    return balance / 1e9; // Convert lamports to SOL
+    return balance / 1e9;
   } catch (e) {
     console.error('Error getting SOL balance:', e);
     return 0;
