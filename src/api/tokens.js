@@ -8,7 +8,38 @@ import { supabase, isSupabaseConfigured } from '../utils/supabase.js';
 import solana, { createMintKeypair, getNetworkInfo, getSolBalance } from '../utils/solana.js';
 
 const GRADUATION_LIQUIDITY_SOL = 1_500_000_000; // 1.5 SOL devnet
-const GRADUATION_LIQUIDITY_LAMPORTS = BigInt(GRADUATION_LIQUIDITY_SOL);
+// Helper to convert BigInt to string for JSON
+function toJSON(obj) {
+  return JSON.stringify(obj, (key, value) => 
+    typeof value === 'bigint' ? value.toString() : value
+  );
+}
+
+function toJSONParse(jsonString) {
+  return JSON.parse(jsonString, (key, value) => {
+    if (typeof value === 'string' && /^\d+n$/.test(value)) {
+      return BigInt(value);
+    }
+    return value;
+  });
+}
+
+/**
+ * Convert BigInt values to strings in response
+ */
+function sanitizeForJSON(obj) {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj === 'bigint') return obj.toString();
+  if (Array.isArray(obj)) return obj.map(sanitizeForJSON);
+  if (typeof obj === 'object') {
+    const result = {};
+    for (const key of Object.keys(obj)) {
+      result[key] = sanitizeForJSON(obj[key]);
+    }
+    return result;
+  }
+  return obj;
+}
 const PLATFORM_FEE = 0.01;
 
 // Mode: 'simulation' | 'onchain'
@@ -169,7 +200,7 @@ export async function launchToken(req, res) {
       }
     }
     
-    res.json({
+    res.json(sanitizeForJSON({
       success: true,
       token: {
         id: token.id,
@@ -205,7 +236,7 @@ export async function listTokens(req, res) {
           .order('created_at', { ascending: false });
         
         if (!error && data && data.length > 0) {
-          return res.json({ 
+          return res.json(sanitizeForJSON({ 
             tokens: data.map(t => ({
               id: t.id,
               mint: t.mint,
@@ -225,7 +256,7 @@ export async function listTokens(req, res) {
     
     // Fallback to memory
     const tokenList = Array.from(tokens.values());
-    res.json({ tokens: tokenList });
+    res.json(sanitizeForJSON({ tokens: tokenList });
     
   } catch (error) {
     console.error('List tokens error:', error);
@@ -244,7 +275,7 @@ export async function getToken(req, res) {
     const token = tokens.get(id) || Array.from(tokens.values()).find(t => t.mint === id);
     
     if (token) {
-      return res.json({ token });
+      return res.json(sanitizeForJSON({ token });
     }
     
     // Try Supabase
@@ -256,7 +287,7 @@ export async function getToken(req, res) {
         .single();
       
       if (data) {
-        return res.json({ token: data });
+        return res.json(sanitizeForJSON({ token: data });
       }
     }
     
@@ -315,7 +346,7 @@ export async function contributeLiquidity(req, res) {
       }
     }
     
-    res.json({
+    res.json(sanitizeForJSON({
       success: true,
       liquidity: solAmount,
       progress: Number(progress),
@@ -352,7 +383,7 @@ export async function addCollaborator(req, res) {
       return contributeLiquidity(req, res);
     }
     
-    res.json({ success: true, collaborators: token.collaborators });
+    res.json(sanitizeForJSON({ success: true, collaborators: token.collaborators });
     
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -382,7 +413,7 @@ export async function buyTokens(req, res) {
     curve.realTokenReserves -= tokensOut;
     curve.totalBuys++;
     
-    res.json({
+    res.json(sanitizeForJSON({
       success: true,
       solSpent: solAmount,
       tokensReceived: Number(tokensOut),
@@ -418,7 +449,7 @@ export async function sellTokens(req, res) {
     curve.realSolReserves -= solOut;
     curve.totalSells++;
     
-    res.json({
+    res.json(sanitizeForJSON({
       success: true,
       tokensSold: tokenAmount,
       solReceived: Number(solOut) / 1e9,
