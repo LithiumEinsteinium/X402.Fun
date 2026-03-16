@@ -127,7 +127,7 @@ export async function createLaunchTransaction(req, res) {
     
     res.json({
       success: true,
-      mint: mintPubkey.toBase58(),
+      mint: mintPubkey.toBase58(), mintPrivateKey: bs58.encode(mint.secretKey),
       bondingCurve: bondingCurvePubkey.toBase58(),
       tokenAccount: tokenPubkey.toBase58(),
       transaction: transactionBase64,
