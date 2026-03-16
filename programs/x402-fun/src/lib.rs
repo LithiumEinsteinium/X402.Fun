@@ -31,6 +31,19 @@ use anchor_spl::token_interface::{
 
 declare_id!("63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF");
 
+// PumpSwap AMM program. Pool PDA seeds: ["pool", index_le_bytes, creator, base_mint, quote_mint].
+// IDL: https://gist.github.com/Taylor123/dcd9f3285ca105efdcdf98089a2b3198
+const PUMPSWAP_PROGRAM_ID: Pubkey = pubkey!("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA");
+
+// Wrapped SOL mint — used as the quote token in all PumpSwap pools.
+const WSOL_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
+
+// Token Extensions Program — PumpSwap uses it for LP token mints.
+const TOKEN_2022_PROGRAM_ID: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
+// create_pool discriminator from the PumpSwap IDL.
+const CREATE_POOL_DISCRIMINATOR: [u8; 8] = [233, 146, 209, 142, 207, 104, 64, 188];
+
 // === CONFIGURATION ===
 // Switch before mainnet deployment:
 // Devnet:  1_500_000_000  (1.5 SOL — easy to test)
@@ -53,6 +66,14 @@ pub const TOKEN_DECIMALS: u8 = 9;
 pub const MAX_NAME_LEN: usize = 32;
 pub const MAX_SYMBOL_LEN: usize = 10;
 pub const MAX_URI_LEN: usize = 200;
+
+// Proportion of curve tokens transferred to the PumpSwap pool at graduation.
+// 70% of the tokens remaining in the bonding curve vault go to the pool.
+const GRADUATION_TOKEN_BPS: u64 = 7_000;
+
+// Proportion of curve SOL transferred to the PumpSwap pool at graduation.
+// 85% of real_sol_reserves go to the pool; the remainder covers fees and rent.
+const GRADUATION_SOL_BPS: u64 = 8_500;
 
 #[program]
 pub mod x402_fun {
@@ -329,6 +350,128 @@ pub mod x402_fun {
         emit!(LiquidityContributionEvent { mint: mint_key, contributor: context.accounts.contributor.key(), amount, total_liquidity, target: GRADUATION_LIQUIDITY_LAMPORTS, percent });
         Ok(())
     }
+
+    /// Creates a PumpSwap AMM pool using the bonding curve's accumulated SOL and tokens.
+    /// Callable by anyone once the bonding curve has graduated (curve.complete == true).
+    /// Transfers GRADUATION_TOKEN_BPS of vault tokens and GRADUATION_SOL_BPS of real SOL
+    /// to the new pool. The bonding curve PDA signs as pool creator.
+    pub fn graduate_to_pumpswap(
+        context: Context<GraduateToPumpSwap>,
+        pool_index: u16,
+    ) -> Result<()> {
+        require!(context.accounts.bonding_curve.complete, X402Error::NotYetGraduated);
+        require!(!context.accounts.token.completed, X402Error::AlreadyCompleted);
+
+        let curve = &context.accounts.bonding_curve;
+        let mint_key = curve.mint;
+        let curve_bump = curve.bump;
+
+        let base_amount_in = compute_fee(
+            context.accounts.vault_token_account.amount,
+            GRADUATION_TOKEN_BPS,
+        )?;
+        let quote_amount_in = compute_fee(curve.real_sol_reserves, GRADUATION_SOL_BPS)?;
+
+        require!(base_amount_in > 0, X402Error::InsufficientFunds);
+        require!(quote_amount_in > 0, X402Error::InsufficientFunds);
+
+        // Mark completed before CPIs (checks-effects-interactions).
+        context.accounts.token.completed = true;
+
+        // The bonding curve PDA acts as the pool creator and signs all CPIs.
+        let mint_key_bytes = mint_key.to_bytes();
+        let curve_signer_seeds: &[&[u8]] = &[b"curve", mint_key_bytes.as_ref(), &[curve_bump]];
+
+        // Wrap SOL: transfer lamports into the curve's WSOL ATA, then sync.
+        anchor_lang::solana_program::program::invoke_signed(
+            &anchor_lang::solana_program::system_instruction::transfer(
+                &context.accounts.bonding_curve.key(),
+                &context.accounts.curve_wsol_account.key(),
+                quote_amount_in,
+            ),
+            &[
+                context.accounts.bonding_curve.to_account_info(),
+                context.accounts.curve_wsol_account.to_account_info(),
+                context.accounts.system_program.to_account_info(),
+            ],
+            &[curve_signer_seeds],
+        )?;
+
+        // sync_native so the WSOL ATA reflects the deposited lamports.
+        anchor_spl::token::sync_native(CpiContext::new_with_signer(
+            context.accounts.base_token_program.to_account_info(),
+            anchor_spl::token::SyncNative {
+                account: context.accounts.curve_wsol_account.to_account_info(),
+            },
+            &[curve_signer_seeds],
+        ))?;
+
+        // Build create_pool instruction data: discriminator + index (u16 LE) + base_amount_in (u64 LE) + quote_amount_in (u64 LE).
+        let mut instruction_data = Vec::with_capacity(8 + 2 + 8 + 8);
+        instruction_data.extend_from_slice(&CREATE_POOL_DISCRIMINATOR);
+        instruction_data.extend_from_slice(&pool_index.to_le_bytes());
+        instruction_data.extend_from_slice(&base_amount_in.to_le_bytes());
+        instruction_data.extend_from_slice(&quote_amount_in.to_le_bytes());
+
+        let create_pool_instruction = anchor_lang::solana_program::instruction::Instruction {
+            program_id: PUMPSWAP_PROGRAM_ID,
+            accounts: vec![
+                anchor_lang::solana_program::instruction::AccountMeta::new(context.accounts.pool.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(context.accounts.pumpswap_global_config.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new(context.accounts.bonding_curve.key(), true),
+                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(context.accounts.mint.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(context.accounts.wsol_mint.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new(context.accounts.lp_mint.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new(context.accounts.vault_token_account.key(), true),
+                anchor_lang::solana_program::instruction::AccountMeta::new(context.accounts.curve_wsol_account.key(), true),
+                anchor_lang::solana_program::instruction::AccountMeta::new(context.accounts.curve_lp_token_account.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new(context.accounts.pool_base_token_account.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new(context.accounts.pool_quote_token_account.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(context.accounts.system_program.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(TOKEN_2022_PROGRAM_ID, false),
+                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(context.accounts.base_token_program.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(context.accounts.quote_token_program.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(context.accounts.associated_token_program.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(context.accounts.pumpswap_event_authority.key(), false),
+                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(PUMPSWAP_PROGRAM_ID, false),
+            ],
+            data: instruction_data,
+        };
+
+        anchor_lang::solana_program::program::invoke_signed(
+            &create_pool_instruction,
+            &[
+                context.accounts.pool.to_account_info(),
+                context.accounts.pumpswap_global_config.to_account_info(),
+                context.accounts.bonding_curve.to_account_info(),
+                context.accounts.mint.to_account_info(),
+                context.accounts.wsol_mint.to_account_info(),
+                context.accounts.lp_mint.to_account_info(),
+                context.accounts.vault_token_account.to_account_info(),
+                context.accounts.curve_wsol_account.to_account_info(),
+                context.accounts.curve_lp_token_account.to_account_info(),
+                context.accounts.pool_base_token_account.to_account_info(),
+                context.accounts.pool_quote_token_account.to_account_info(),
+                context.accounts.system_program.to_account_info(),
+                context.accounts.token_2022_program.to_account_info(),
+                context.accounts.base_token_program.to_account_info(),
+                context.accounts.quote_token_program.to_account_info(),
+                context.accounts.associated_token_program.to_account_info(),
+                context.accounts.pumpswap_event_authority.to_account_info(),
+                context.accounts.pumpswap_program.to_account_info(),
+            ],
+            &[curve_signer_seeds],
+        )?;
+
+        emit!(PumpSwapGraduationEvent {
+            mint: mint_key,
+            pool: context.accounts.pool.key(),
+            base_amount_in,
+            quote_amount_in,
+        });
+
+        Ok(())
+    }
 }
 
 fn compute_tokens_out(sol_amount: u64, curve: &BondingCurve) -> Result<u64> {
@@ -456,6 +599,128 @@ pub struct ContributeLiquidity<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[derive(Accounts)]
+#[instruction(pool_index: u16)]
+pub struct GraduateToPumpSwap<'info> {
+    #[account(mut, seeds = [b"token", bonding_curve.mint.as_ref()], bump = token.bump)]
+    pub token: Account<'info, TokenState>,
+
+    #[account(mut, seeds = [b"curve", bonding_curve.mint.as_ref()], bump = bonding_curve.bump)]
+    pub bonding_curve: Account<'info, BondingCurve>,
+
+    pub mint: InterfaceAccount<'info, Mint>,
+
+    // Bonding curve's token vault — source of base tokens for the pool.
+    #[account(
+        mut,
+        associated_token::mint = mint,
+        associated_token::authority = bonding_curve,
+        associated_token::token_program = base_token_program
+    )]
+    pub vault_token_account: InterfaceAccount<'info, TokenAccount>,
+
+    // Bonding curve's WSOL ATA — SOL is wrapped here then passed to PumpSwap.
+    /// CHECK: ATA of bonding_curve for WSOL; validated via associated_token seeds.
+    #[account(
+        mut,
+        seeds = [
+            bonding_curve.key().as_ref(),
+            quote_token_program.key().as_ref(),
+            wsol_mint.key().as_ref(),
+        ],
+        seeds::program = anchor_spl::associated_token::ID,
+        bump
+    )]
+    pub curve_wsol_account: UncheckedAccount<'info>,
+
+    // LP tokens minted by PumpSwap are sent here (ATA of bonding_curve for lp_mint).
+    /// CHECK: ATA of bonding_curve for the LP mint created by PumpSwap; validated via associated_token seeds.
+    #[account(
+        mut,
+        seeds = [
+            bonding_curve.key().as_ref(),
+            token_2022_program.key().as_ref(),
+            lp_mint.key().as_ref(),
+        ],
+        seeds::program = anchor_spl::associated_token::ID,
+        bump
+    )]
+    pub curve_lp_token_account: UncheckedAccount<'info>,
+
+    // Pool PDA owned by PumpSwap — seeds: ["pool", index_le, creator, base_mint, quote_mint].
+    /// CHECK: PDA owned and validated by PumpSwap; we only pass it through.
+    #[account(
+        mut,
+        seeds = [
+            b"pool",
+            &pool_index.to_le_bytes(),
+            bonding_curve.key().as_ref(),
+            mint.key().as_ref(),
+            WSOL_MINT.as_ref(),
+        ],
+        seeds::program = PUMPSWAP_PROGRAM_ID,
+        bump
+    )]
+    pub pool: UncheckedAccount<'info>,
+
+    // LP mint PDA — seeds: ["pool_lp_mint", pool], owned by Token-2022 program.
+    /// CHECK: PDA owned and created by PumpSwap via Token-2022; we only pass it through.
+    #[account(
+        mut,
+        seeds = [b"pool_lp_mint", pool.key().as_ref()],
+        seeds::program = PUMPSWAP_PROGRAM_ID,
+        bump
+    )]
+    pub lp_mint: UncheckedAccount<'info>,
+
+    // Pool's ATA for the base token (our mint), owned by PumpSwap pool PDA.
+    /// CHECK: ATA of pool for base_mint; created and validated by PumpSwap.
+    #[account(mut)]
+    pub pool_base_token_account: UncheckedAccount<'info>,
+
+    // Pool's ATA for quote token (WSOL), owned by PumpSwap pool PDA.
+    /// CHECK: ATA of pool for WSOL; created and validated by PumpSwap.
+    #[account(mut)]
+    pub pool_quote_token_account: UncheckedAccount<'info>,
+
+    // PumpSwap GlobalConfig PDA — seeds: ["global_config"].
+    /// CHECK: PDA validated by PumpSwap; we only pass it through as readonly.
+    #[account(
+        seeds = [b"global_config"],
+        seeds::program = PUMPSWAP_PROGRAM_ID,
+        bump
+    )]
+    pub pumpswap_global_config: UncheckedAccount<'info>,
+
+    // PumpSwap event_authority PDA — seeds: ["__event_authority"].
+    /// CHECK: PDA validated by PumpSwap for its self-CPI event emission.
+    #[account(
+        seeds = [b"__event_authority"],
+        seeds::program = PUMPSWAP_PROGRAM_ID,
+        bump
+    )]
+    pub pumpswap_event_authority: UncheckedAccount<'info>,
+
+    // WSOL mint — quote token for all PumpSwap pools.
+    /// CHECK: Address constraint enforces this is the canonical WSOL mint.
+    #[account(address = WSOL_MINT)]
+    pub wsol_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Address constraint enforces this is the PumpSwap program.
+    #[account(address = PUMPSWAP_PROGRAM_ID)]
+    pub pumpswap_program: UncheckedAccount<'info>,
+
+    pub base_token_program: Interface<'info, TokenInterface>,
+    pub quote_token_program: Interface<'info, TokenInterface>,
+
+    /// CHECK: Address constraint enforces this is the Token-2022 program.
+    #[account(address = TOKEN_2022_PROGRAM_ID)]
+    pub token_2022_program: UncheckedAccount<'info>,
+
+    pub associated_token_program: Program<'info, anchor_spl::associated_token::AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
 #[derive(InitSpace)]
 #[account]
 pub struct Global {
@@ -521,11 +786,17 @@ pub struct SellEvent { pub mint: Pubkey, pub seller: Pubkey, pub tokens_sold: u6
 pub struct LiquidityContributionEvent { pub mint: Pubkey, pub contributor: Pubkey, pub amount: u64, pub total_liquidity: u64, pub target: u64, pub percent: u64 }
 #[event]
 pub struct GraduationEvent { pub mint: Pubkey, pub total_liquidity: u64 }
+#[event]
+pub struct PumpSwapGraduationEvent { pub mint: Pubkey, pub pool: Pubkey, pub base_amount_in: u64, pub quote_amount_in: u64 }
 
 #[error_code]
 pub enum X402Error {
     #[msg("Token has already graduated")]
     AlreadyGraduated,
+    #[msg("Token has not yet reached graduation threshold")]
+    NotYetGraduated,
+    #[msg("Token pool has already been created")]
+    AlreadyCompleted,
     #[msg("Overflow")]
     Overflow,
     #[msg("Slippage exceeded")]
