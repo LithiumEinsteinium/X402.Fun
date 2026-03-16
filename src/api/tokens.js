@@ -3,6 +3,7 @@
  */
 
 import { supabase, isSupabaseConfigured } from '../utils/supabase.js';
+import { announceLaunch, announceGraduation, announceBuy, announceSell } from '../utils/telegram.js';
 
 const GRADUATION_LIQUIDITY_SOL = 1_500_000_000;
 const GRADUATION_LIQUIDITY_LAMPORTS = BigInt(GRADUATION_LIQUIDITY_SOL);
@@ -61,6 +62,14 @@ export async function launchToken(req, res) {
     
     tokens.set(tokenId, token);
     bondingCurves.set(mintAddress, bondingCurve);
+    
+    // Announce to Telegram
+    announceLaunch({
+      name: token.name,
+      symbol: token.symbol,
+      creator: token.creatorWallet,
+      mint: token.mint
+    });
     
     res.json({
       success: true,
@@ -133,6 +142,14 @@ export async function contributeLiquidity(req, res) {
     if (graduated) {
       curve.complete = true;
       token.graduated = true;
+      
+      // Announce graduation
+      announceGraduation({
+        name: token.name,
+        symbol: token.symbol,
+        creator: token.creatorWallet,
+        mint: token.mint
+      });
     }
     
     res.json({
