@@ -4,6 +4,7 @@
  */
 
 import { Connection, PublicKey, Transaction, SystemProgram, ComputeBudgetProgram, Keypair } from '@solana/web3.js';
+import { createInitializeMintInstruction, MINT_SIZE, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import bs58 from 'bs58';
 
 const PROGRAM_ID = process.env.PROGRAM_ID || '63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF';
@@ -99,24 +100,28 @@ export async function createLaunchTransaction(req, res) {
       ComputeBudgetProgram.setComputeUnitLimit({ units: 200000 })
     );
     
-    const lamports = await connection.getMinimumBalanceForRentExemption(82);
-    
+    const lamports = await connection.getMinimumBalanceForRentExemption(MINT_SIZE);
+
+    // Create mint account
     transaction.add(
       SystemProgram.createAccount({
         fromPubkey: new PublicKey(creatorWallet),
         newAccountPubkey: mint,
-        space: 82,
+        space: MINT_SIZE,
         lamports: lamports,
-        programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+        programId: TOKEN_PROGRAM_ID
       })
     );
-    
+
+    // Initialize mint with proper instruction
     transaction.add(
-      new Transaction().add({
-        keys: [{ pubkey: mint, isSigner: true, isWritable: true }],
-        programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
-        data: Buffer.from([...Buffer.from([2, 0, 0, 0, 6]), ...new PublicKey(creatorWallet).toBuffer(), ...new PublicKey(creatorWallet).toBuffer()])
-      })
+      createInitializeMintInstruction(
+        mint,
+        6, // decimals
+        new PublicKey(creatorWallet), // mint authority
+        null, // freeze authority
+        TOKEN_PROGRAM_ID
+      )
     );
     
     const transactionBase64 = transaction.serialize({ requireAllSignatures: false }).toString('base64');
