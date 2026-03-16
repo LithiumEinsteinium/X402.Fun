@@ -349,7 +349,7 @@ fn compute_fee(amount: u64, bps: u64) -> Result<u64> {
 
 #[derive(Accounts)]
 pub struct Initialize<'info> {
-    #[account(init, payer = authority, seeds = [b"global"], bump)]
+    #[account(init, payer = authority, seeds = [b"global"], bump, space = 8 + Global::INIT_SPACE)]
     pub global: Account<'info, Global>,
     #[account(mut)]
     pub authority: Signer<'info>,
@@ -360,10 +360,11 @@ pub struct Initialize<'info> {
 #[derive(Accounts)]
 #[instruction(nonce: [u8; 32])]
 pub struct RecordX402Payment<'info> {
-    #[account(init, payer = oracle, seeds = [b"x402", payer.key().as_ref(), nonce.as_ref()], bump)]
+    #[account(init, payer = oracle, seeds = [b"x402", payer.key().as_ref(), nonce.as_ref()], bump, space = 8 + X402Receipt::INIT_SPACE)]
     pub receipt: Account<'info, X402Receipt>,
     #[account(mut)]
     pub oracle: Signer<'info>,
+    /// CHECK: Arbitrary pubkey whose payment is being recorded; used only as a seed for the receipt PDA and stored in receipt.payer — no lamport or data access.
     pub payer: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
@@ -375,9 +376,9 @@ pub struct LaunchToken<'info> {
     pub global: Account<'info, Global>,
     #[account(mut, seeds = [b"x402", creator.key().as_ref(), nonce.as_ref()], bump = x402_receipt.bump, constraint = x402_receipt.payer == creator.key())]
     pub x402_receipt: Account<'info, X402Receipt>,
-    #[account(init, payer = creator, seeds = [b"token", mint.key().as_ref()], bump)]
+    #[account(init, payer = creator, seeds = [b"token", mint.key().as_ref()], bump, space = 8 + TokenState::INIT_SPACE)]
     pub token: Account<'info, TokenState>,
-    #[account(init, payer = creator, seeds = [b"curve", mint.key().as_ref()], bump)]
+    #[account(init, payer = creator, seeds = [b"curve", mint.key().as_ref()], bump, space = 8 + BondingCurve::INIT_SPACE)]
     pub bonding_curve: Account<'info, BondingCurve>,
     #[account(init, payer = creator, mint::decimals = TOKEN_DECIMALS, mint::authority = creator, seeds = [b"mint", creator.key().as_ref(), name.as_bytes()], bump)]
     pub mint: InterfaceAccount<'info, Mint>,
@@ -406,8 +407,10 @@ pub struct Buy<'info> {
     pub mint: InterfaceAccount<'info, Mint>,
     #[account(mut)]
     pub buyer: Signer<'info>,
+    /// CHECK: Address verified against global.fee_recipient via constraint; receives SOL fee transfer only.
     #[account(mut, constraint = fee_recipient.key() == global.fee_recipient)]
     pub fee_recipient: UncheckedAccount<'info>,
+    /// CHECK: Address verified against token.creator via constraint; receives SOL creator fee transfer only.
     #[account(mut, constraint = creator.key() == token.creator)]
     pub creator: UncheckedAccount<'info>,
     pub token_program: Interface<'info, TokenInterface>,
@@ -432,8 +435,10 @@ pub struct Sell<'info> {
     pub mint: InterfaceAccount<'info, Mint>,
     #[account(mut)]
     pub seller: Signer<'info>,
+    /// CHECK: Address verified against global.fee_recipient via constraint; receives SOL fee transfer only.
     #[account(mut, constraint = fee_recipient.key() == global.fee_recipient)]
     pub fee_recipient: UncheckedAccount<'info>,
+    /// CHECK: Address verified against token.creator via constraint; receives SOL creator fee transfer only.
     #[account(mut, constraint = creator.key() == token.creator)]
     pub creator: UncheckedAccount<'info>,
     pub token_program: Interface<'info, TokenInterface>,
