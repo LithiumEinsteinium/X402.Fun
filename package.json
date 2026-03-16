@@ -13,6 +13,7 @@
   "dependencies": {
     "@jup-ag/api": "^6.0.0",
     "@modelcontextprotocol/sdk": "^0.5.0",
+    "@pump-fun/pump-sdk": "^1.31.0",
     "@solana/spl-token": "^0.4.0",
     "@solana/web3.js": "^1.91.0",
     "@supabase/supabase-js": "^2.39.0",

@@ -40,6 +40,7 @@ import x402 from './api/x402.js';
 import pumpswap from './api/pumpswap.js';
 import agentSigned from './api/agent-signed.js';
 import program from './api/program-integration.js';
+import pumpfun from './api/pumpfun.js';
 
 app.post('/api/agents/register', agents.registerAgent);
 app.get('/api/agents/:id', agents.getAgent);
@@ -53,6 +54,15 @@ app.post('/api/program/create-launch', program.createLaunchTransaction);
 app.post('/api/program/verify-launch', program.verifyLaunch);
 app.post('/api/program/create-contribute', program.createContributeTransaction);
 app.post('/api/program/verify-contribute', program.verifyContribution);
+
+// PumpFun SDK integration (real bonding curve)
+app.get('/api/pumpfun/config', pumpfun.getPlatformConfig);
+app.get('/api/pumpfun/network', pumpfun.getNetworkInfo);
+app.post('/api/pumpfun/create', pumpfun.createToken);
+app.post('/api/pumpfun/verify', pumpfun.verifyToken);
+app.post('/api/pumpfun/buy', pumpfun.getBuyTransaction);
+app.post('/api/pumpfun/sell', pumpfun.getSellTransaction);
+app.get('/api/pumpfun/supply/:mint', pumpfun.getTokenSupply);
 
 // Agent-signed endpoints (legacy)
 app.get('/api/agent/config', agentSigned.getPlatformConfig);
