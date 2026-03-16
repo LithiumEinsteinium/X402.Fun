@@ -382,31 +382,48 @@ export async function createPumpSwapPool(req, res) {
       pumpswapProgram
     );
     
-    // Get ATAs
-    const curveWSOL = getAssociatedTokenAddressSync(
-      WRAPPED_SOL_MINT,
+    // Get LP mint PDA
+    const [lpMint] = PublicKey.findProgramAddressSync(
+      [Buffer.from('pool_lp_mint'), poolPubkey.toBuffer()],
+      pumpswapProgram
+    );
+    
+    // Get pool ATAs
+    const curveLP = getAssociatedTokenAddressSync(
+      lpMint,
       bondingCurvePubkey,
       true,
       TOKEN_2022_PROGRAM_ID,
       ASSOCIATED_TOKEN_PROGRAM_ID
     );
     
-    const vaultTokenAccount = getAssociatedTokenAddressSync(
+    const poolBaseToken = getAssociatedTokenAddressSync(
       mintPubkey,
-      bondingCurvePubkey,
+      poolPubkey,
       true,
       TOKEN_2022_PROGRAM_ID,
       ASSOCIATED_TOKEN_PROGRAM_ID
     );
     
-    // Check if WSOL ATA exists
+    const poolQuoteToken = getAssociatedTokenAddressSync(
+      WRAPPED_SOL_MINT,
+      poolPubkey,
+      true,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+    
+    // Check if ATAs exist
     let wsolATAExists = false;
+    let lpATAExists = false;
     try {
       await getAccount(connection, curveWSOL);
       wsolATAExists = true;
-    } catch (e) {
-      wsolATAExists = false;
-    }
+    } catch (e) {}
+    try {
+      await getAccount(connection, curveLP);
+      lpATAExists = true;
+    } catch (e) {}
     
     const { blockhash } = await connection.getLatestBlockhash();
     
@@ -415,11 +432,11 @@ export async function createPumpSwapPool(req, res) {
     transaction.recentBlockhash = blockhash;
     
     transaction.add(
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 800000 }),
-      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1000000 })
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 1200000 }),
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 2000000 })
     );
     
-    // Create WSOL ATA if it doesn't exist
+    // Create WSOL ATA if needed
     if (!wsolATAExists) {
       transaction.add(
         createAssociatedTokenAccountInstruction(
@@ -433,29 +450,81 @@ export async function createPumpSwapPool(req, res) {
       );
     }
     
-    // Create CPI instruction data for graduate_to_pumpswap
-    // This would call our program which then calls PumpSwap
-    // For now, we build a simplified version
+    // Create LP ATA if needed
+    if (!lpATAExists) {
+      transaction.add(
+        createAssociatedTokenAccountInstruction(
+          contributor,
+          curveLP,
+          bondingCurvePubkey,
+          lpMint,
+          TOKEN_2022_PROGRAM_ID,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
+      );
+    }
+    
+    // Graduate to PumpSwap instruction data
+    // Discriminator: sha256("global:graduate_to_pumpswap")[:8]
+    const GRADUATE_DISCRIMINATOR = Buffer.from([0x23, 0x27, 0x5a, 0xd5, 0x9c, 0x5e, 0x83, 0x48]);
+    const poolIndexBuf = Buffer.alloc(2);
+    poolIndexBuf.writeUInt16LE(poolIndex);
+    const instructionData = Buffer.concat([GRADUATE_DISCRIMINATOR, poolIndexBuf]);
+    
+    // Add graduate_to_pumpswap instruction
+    transaction.add({
+      keys: [
+        { pubkey: tokenPubkey, isSigner: false, isWritable: true },
+        { pubkey: bondingCurvePubkey, isSigner: false, isWritable: true },
+        { pubkey: mintPubkey, isSigner: false, isWritable: false },
+        { pubkey: vaultTokenAccount, isSigner: false, isWritable: true },
+        { pubkey: curveWSOL, isSigner: false, isWritable: true },
+        { pubkey: curveLP, isSigner: false, isWritable: true },
+        { pubkey: poolPubkey, isSigner: false, isWritable: true },
+        { pubkey: lpMint, isSigner: false, isWritable: true },
+        { pubkey: poolBaseToken, isSigner: false, isWritable: true },
+        { pubkey: poolQuoteToken, isSigner: false, isWritable: true },
+        { pubkey: globalConfig, isSigner: false, isWritable: false },
+        { pubkey: eventAuthority, isSigner: false, isWritable: false },
+        { pubkey: WRAPPED_SOL_MINT, isSigner: false, isWritable: false },
+        { pubkey: pumpswapProgram, isSigner: false, isWritable: false },
+        { pubkey: TOKEN_2022, isSigner: false, isWritable: false },
+        { pubkey: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'), isSigner: false, isWritable: false },
+        { pubkey: WRAPPED_SOL_MINT, isSigner: false, isWritable: false },
+        { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      programId: programPubkey,
+      data: instructionData
+    });
     
     const transactionBase64 = transaction.serialize({ requireAllSignatures: false }).toString('base64');
     
-    console.log(`🏊 Pool creation for ${mint}`);
+    console.log(`🏊 Creating PumpSwap pool for ${mint}`);
     console.log(`   Bonding curve: ${bondingCurvePubkey.toBase58()}`);
     console.log(`   Pool: ${poolPubkey.toBase58()}`);
-    console.log(`   WSOL ATA exists: ${wsolATAExists}`);
+    console.log(`   WSOL ATA: ${wsolATAExists ? 'exists' : 'created'}`);
+    console.log(`   LP ATA: ${lpATAExists ? 'exists' : 'created'}`);
     
     res.json({
       success: true,
       mint,
       bondingCurve: bondingCurvePubkey.toBase58(),
+      tokenAccount: tokenPubkey.toBase58(),
       pool: poolPubkey.toBase58(),
       poolIndex,
-      wsolATA: curveWSOL.toBase58(),
-      vaultTokenAccount: vaultTokenAccount.toBase58(),
-      globalConfig: globalConfig.toBase58(),
+      accounts: {
+        curveWSOL: curveWSOL.toBase58(),
+        curveLP: curveLP.toBase58(),
+        vaultTokenAccount: vaultTokenAccount.toBase58(),
+        lpMint: lpMint.toBase58(),
+        poolBaseToken: poolBaseToken.toBase58(),
+        poolQuoteToken: poolQuoteToken.toBase58(),
+        globalConfig: globalConfig.toBase58(),
+        eventAuthority: eventAuthority.toBase58()
+      },
       transaction: transactionBase64,
-      message: 'Transaction ready. Sign and submit to create PumpSwap pool.',
-      note: 'This creates ATAs. Full graduate_to_pumpswap CPI coming soon.'
+      message: 'Sign this transaction to create the PumpSwap pool!'
     });
     
   } catch (error) {
