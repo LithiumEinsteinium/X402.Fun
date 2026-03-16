@@ -47,7 +47,7 @@ curl -X POST https://x402-fun.onrender.com/api/agents/register \
 ## Step 2: Launch a Token
 
 ```bash
-curl -X POST https://x402-fun.onrender.com/api/program/create-launch \
+curl -X POST https://x402-fun.onrender.com/api/agent/create-launch \
   -H "Content-Type: application/json" \
   -d '{
     "name": "AgentTestToken",
@@ -328,7 +328,7 @@ curl -X POST https://x402-fun.onrender.com/api/program/create-pool \
 
 | Issue | Cause | Fix |
 |-------|-------|-----|
-| `mintPrivateKey` missing | Wrong endpoint | Use `/api/program/create-launch` NOT `/api/tokens/launch` |
+| `mintPrivateKey` missing | Wrong endpoint | Use `/api/agent/create-launch` NOT `/api/tokens/launch` |
 | Transaction fails | Missing mint signature | Sign with **both** creator AND mint keypairs |
 | "Insufficient funds" | No Devnet SOL | Get Devnet SOL from https://solana.com/faucet |
 | "Transaction not found" | Wrong cluster | Ensure using Devnet RPC, not Mainnet |
