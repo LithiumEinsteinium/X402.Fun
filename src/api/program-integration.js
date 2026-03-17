@@ -745,5 +745,5 @@ export default {
   createContributeTransaction,
   verifyContribution,
   createPumpSwapPool,
-  createBuyTransaction, createSellTransaction
+  createBuyTransaction, createSellTransaction, initializeProgram
 };
