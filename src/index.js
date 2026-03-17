@@ -39,9 +39,7 @@ import x402 from './api/x402.js';
 import x402Integration from './api/x402-integration.js';
 import pumpswap from './api/pumpswap.js';
 import agentSigned from './api/agent-signed.js';
-// Full version with x402 receipts
 import programIntegration from './api/program-integration.js';
-// import programIntegration from './api/program-integration-simple.js';
 import pumpfun from './api/pumpfun.js';
 
 // Agent routes
@@ -60,6 +58,15 @@ app.post('/api/program/create-buy', programIntegration.createBuyTransaction);
 app.post('/api/program/create-sell', programIntegration.createSellTransaction);
 app.post('/api/program/create-contribute', programIntegration.createContributeTransaction);
 app.post('/api/program/verify-contribute', programIntegration.verifyContribute);
+
+// Token info routes (used by MCP server and UI)
+import tokens from './api/tokens.js';
+app.post('/api/tokens/launch', tokens.launchToken);
+app.get('/api/tokens', tokens.listTokens);
+app.get('/api/tokens/:id', tokens.getToken);
+app.post('/api/tokens/buy', programIntegration.createBuyTransaction);
+app.post('/api/tokens/sell', programIntegration.createSellTransaction);
+app.post('/api/tokens/:id/contribute', tokens.contributeLiquidity);
 
 // x402 payment routes (off-chain fallback)
 app.get('/api/x402-integration/price', x402Integration.getPrice);
