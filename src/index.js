@@ -39,7 +39,9 @@ import x402 from './api/x402.js';
 import x402Integration from './api/x402-integration.js';
 import pumpswap from './api/pumpswap.js';
 import agentSigned from './api/agent-signed.js';
-import programIntegration from './api/program-integration.js';
+// Use simple version if deployed program doesn't have record_x402_payment
+// import programIntegration from './api/program-integration.js';
+import programIntegration from './api/program-integration-simple.js';
 import pumpfun from './api/pumpfun.js';
 
 // Agent routes
