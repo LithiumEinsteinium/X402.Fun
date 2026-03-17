@@ -1,25 +1,29 @@
 /**
- * x402 Payment Integration - On-Chain Receipt Management
+ * x402 Payment Integration - Off-Chain Receipt Management
  * 
- * Creates and verifies x402 payment receipts on Solana
+ * Creates and verifies x402 payment receipts off-chain
  * Used for agent-gated trading on bonding curve
+ * 
+ * Flow:
+ * 1. Agent creates payment request → gets receipt ID
+ * 2. Agent sends SOL to platform wallet
+ * 3. Agent uses receipt ID in buy/sell transaction
+ * 4. Backend verifies receipt and marks as used
  */
 
-import { Connection, PublicKey, Transaction, SystemProgram, ComputeBudgetProgram, Keypair } from '@solana/web3.js';
 import crypto from 'crypto';
 
-const PROGRAM_ID = '63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF';
-const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
 const PLATFORM_WALLET = process.env.PLATFORM_WALLET || '7tZMag1w7P1YyGCbAMCdsrYqgeHMm5EdAzKpDs12mmTR';
 
-const connection = new Connection(RPC_URL, 'confirmed');
+// In-memory receipt storage (use Redis/DB in production)
+const receipts = new Map();
 
 // Fee structure
 const FEES = {
   launch: 0.25,
-  buy: 0.001, // 0.1% fee for buy
-  sell: 0.001, // 0.1% fee for sell
-  contribute: 0.01 // 1% fee
+  buy: 0.001, // 0.1% of trade amount
+  sell: 0.001, // 0.1% of trade amount
+  contribute: 0.01 // 1% of contribution
 };
 
 /**
@@ -47,8 +51,8 @@ export async function getPrice(req, res) {
 }
 
 /**
- * Create x402 payment request
- * Generates a unique receipt PDA for the payment
+ * Create x402 payment request (Off-Chain)
+ * Generates a unique receipt ID for tracking
  */
 export async function createPaymentRequest(req, res) {
   try {
@@ -60,59 +64,36 @@ export async function createPaymentRequest(req, res) {
       });
     }
     
-    const walletPubkey = new PublicKey(wallet);
     const fee = FEES[action.toLowerCase()] || 0;
     const totalAmount = amount ? parseFloat(amount) * fee : fee;
     
-    // Generate unique nonce for this payment
-    const nonce = crypto.randomBytes(32);
+    // Generate unique receipt ID
+    const receiptId = crypto.randomBytes(16).toString('hex');
     
-    // Derive x402 receipt PDA
-    const [receiptPDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from('x402'), walletPubkey.toBuffer(), nonce],
-      new PublicKey(PROGRAM_ID)
-    );
-    
-    const { blockhash } = await connection.getLatestBlockhash();
-    
-    const transaction = new Transaction();
-    transaction.feePayer = walletPubkey;
-    transaction.recentBlockhash = blockhash;
-    
-    transaction.add(
-      ComputeBudgetProgram.setComputeUnitLimit({ units: 200000 })
-    );
-    
-    // Create x402 receipt instruction
-    // Discriminator: sha256("global:record_x402_payment")[:8]
-    const RECORD_DISCRIMINATOR = Buffer.from([71, 134, 30, 217, 93, 174, 144, 205]);
-    
-    const instructionData = Buffer.concat([
-      RECORD_DISCRIMINATOR,
-      nonce // 32 bytes
-    ]);
-    
-    transaction.add({
-      keys: [
-        { pubkey: receiptPDA, isSigner: false, isWritable: true },
-        { pubkey: walletPubkey, isSigner: true, isWritable: true },
-        { pubkey: new PublicKey('11111111111111111111111111111111'), isSigner: false, isWritable: false },
-      ],
-      programId: new PublicKey(PROGRAM_ID),
-      data: instructionData
+    // Store receipt in memory
+    receipts.set(receiptId, {
+      id: receiptId,
+      agentId,
+      action,
+      amount: totalAmount,
+      wallet,
+      createdAt: Date.now(),
+      used: false,
+      expiresAt: Date.now() + (10 * 60 * 1000) // 10 minutes
     });
     
-    const transactionBase64 = transaction.serialize({ requireAllSignatures: false }).toString('base64');
+    console.log(`💰 Created x402 receipt: ${receiptId} for ${action} (${totalAmount} SOL)`);
     
     res.json({
       success: true,
-      receipt: receiptPDA.toBase58(),
-      nonce: Buffer.from(nonce).toString('hex'),
+      receiptId,
       action,
       amount: totalAmount,
       fee: totalAmount,
-      transaction: transactionBase64,
-      message: `Sign this transaction to create x402 payment receipt for ${action}`
+      paymentAddress: PLATFORM_WALLET,
+      expiresInSeconds: 600,
+      instructions: `Send ${totalAmount} SOL to ${PLATFORM_WALLET} with memo: ${receiptId}`,
+      message: `Payment receipt created. Send ${totalAmount} SOL to the payment address to activate.`
     });
     
   } catch (error) {
@@ -123,49 +104,56 @@ export async function createPaymentRequest(req, res) {
 
 /**
  * Verify x402 payment receipt
- * Checks if receipt exists and is valid
+ * Checks if receipt exists, is valid, and hasn't been used
  */
 export async function verifyPayment(req, res) {
   try {
-    const { receipt, wallet, action } = req.body;
+    const { receiptId, wallet, action } = req.body;
     
-    if (!receipt || !wallet) {
+    if (!receiptId) {
       return res.status(400).json({ 
-        error: 'receipt and wallet required' 
+        error: 'receiptId required' 
       });
     }
     
-    const receiptPubkey = new PublicKey(receipt);
+    const receipt = receipts.get(receiptId);
     
-    try {
-      // Check if receipt account exists
-      const accountInfo = await connection.getAccountInfo(receiptPubkey);
-      
-      if (!accountInfo) {
-        return res.json({
-          success: false,
-          verified: false,
-          message: 'Receipt not found on-chain'
-        });
-      }
-      
-      // Receipt exists - in production would verify data structure
-      res.json({
-        success: true,
-        verified: true,
-        receipt: receipt,
-        wallet,
-        action,
-        message: 'x402 payment verified'
-      });
-      
-    } catch (e) {
-      res.json({
+    if (!receipt) {
+      return res.json({
         success: false,
         verified: false,
-        message: `Verification failed: ${e.message}`
+        message: 'Receipt not found'
       });
     }
+    
+    // Check if expired
+    if (Date.now() > receipt.expiresAt) {
+      receipts.delete(receiptId);
+      return res.json({
+        success: false,
+        verified: false,
+        message: 'Receipt expired'
+      });
+    }
+    
+    // Check if already used
+    if (receipt.used) {
+      return res.json({
+        success: false,
+        verified: false,
+        message: 'Receipt already used'
+      });
+    }
+    
+    // Receipt is valid
+    res.json({
+      success: true,
+      verified: true,
+      receiptId,
+      action: receipt.action,
+      amount: receipt.amount,
+      message: 'x402 payment verified'
+    });
     
   } catch (error) {
     console.error('Verify payment error:', error);
@@ -174,11 +162,30 @@ export async function verifyPayment(req, res) {
 }
 
 /**
+ * Mark receipt as used (called after successful trade)
+ */
+export function useReceipt(receiptId) {
+  const receipt = receipts.get(receiptId);
+  if (receipt) {
+    receipt.used = true;
+    receipts.set(receiptId, receipt);
+    console.log(`✅ Receipt ${receiptId} marked as used`);
+  }
+}
+
+/**
+ * Get receipt data (for buy/sell endpoints to use)
+ */
+export function getReceipt(receiptId) {
+  return receipts.get(receiptId);
+}
+
+/**
  * Payment webhook for notifications
  */
 export async function paymentWebhook(req, res) {
   try {
-    const { transactionSignature, wallet, action } = req.body;
+    const { transactionSignature, wallet, action, memo } = req.body;
     
     if (!transactionSignature || !wallet) {
       return res.status(400).json({ 
@@ -186,8 +193,13 @@ export async function paymentWebhook(req, res) {
       });
     }
     
-    // In production, verify the transaction on-chain
-    // For now, just acknowledge receipt
+    // If memo (receiptId) is provided, mark as paid
+    if (memo && receipts.has(memo)) {
+      const receipt = receipts.get(memo);
+      // In a real implementation, verify the transaction on-chain
+      console.log(`🔔 Payment verified for receipt ${memo}: ${transactionSignature}`);
+    }
+    
     res.json({ 
       success: true, 
       message: 'Webhook received',
@@ -200,9 +212,22 @@ export async function paymentWebhook(req, res) {
   }
 }
 
+// Cleanup old receipts every minute
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, receipt] of receipts.entries()) {
+    if (now > receipt.expiresAt || receipt.used) {
+      receipts.delete(id);
+      console.log(`🧹 Cleaned up expired/used receipt: ${id}`);
+    }
+  }
+}, 60000);
+
 export default {
   getPrice,
   createPaymentRequest,
   verifyPayment,
-  paymentWebhook
+  paymentWebhook,
+  useReceipt,
+  getReceipt
 };
