@@ -115,3 +115,33 @@ curl -X POST https://x402-fun.onrender.com/api/agent/create-launch \
 
 **TL;DR:** Launch tokens with `/api/agent/create-launch` (no x402). Use x402 only for buy/sell trading operations.
 
+
+## 🔧 Program Initialization (For Deployers Only)
+
+If you're getting "AccountNotInitialized" errors on buy/sell, the program needs initialization.
+
+**As the program deployer, run:**
+
+```bash
+# 1. Create .env file
+cat > .env << ENV
+ADMIN_PRIVATE_KEY=your_base58_private_key_here
+RPC_URL=https://api.devnet.solana.com
+ENV
+
+# 2. Run initialization script
+node scripts/initialize-program.js
+```
+
+This will create the global account required for buy/sell operations.
+
+**Alternative:** Use the backend endpoint (requires high compute budget):
+```bash
+curl -X POST https://x402-fun.onrender.com/api/program/initialize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "authority": "<YOUR_PUBLIC_KEY>",
+    "feeRecipient": "<FEE_RECIPIENT_PUBLIC_KEY>"
+  }'
+```
+
