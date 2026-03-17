@@ -84,11 +84,11 @@ app.post('/api/pumpfun/buy', pumpfun.getBuyTransaction);
 app.post('/api/pumpfun/sell', pumpfun.getSellTransaction);
 app.get('/api/pumpfun/supply/:mint', pumpfun.getTokenSupply);
 
-// PumpSwap routes
-app.get('/api/pumpswap/config', pumpswap.getPlatformConfig);
-app.get('/api/pumpswap/network', pumpswap.getNetworkInfo);
-app.post('/api/pumpswap/create-pool', pumpswap.createPool);
-app.get('/api/pumpswap/pool/:mint', pumpswap.getPoolInfo);
+// PumpSwap routes (TODO: implement)
+// app.get('/api/pumpswap/config', pumpswap.getPlatformConfig);
+// app.get('/api/pumpswap/network', pumpswap.getNetworkInfo);
+// app.post('/api/pumpswap/create-pool', pumpswap.createPool);
+// app.get('/api/pumpswap/pool/:mint', pumpswap.getPoolInfo);
 
 // Start server
 app.listen(PORT, () => {
