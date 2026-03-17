@@ -25,7 +25,7 @@ import {
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
-import { getBase58Decoder } from '@solana/codecs';
+import bs58 from 'bs58';
 import crypto from 'crypto';
 
 const PROGRAM_ID = new PublicKey('63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF');
@@ -90,7 +90,7 @@ function getOracleKeypair() {
   if (!key) {
     throw new Error('ORACLE_PRIVATE_KEY not set in environment');
   }
-  const secretKey = getBase58Decoder().decode(key);
+  const secretKey = bs58.decode(key);
   return Keypair.fromSecretKey(new Uint8Array(secretKey));
 }
 
