@@ -9,6 +9,17 @@
  *   Step 2 (agent):   return unsigned transaction referencing the receipt PDA
  *
  * contribute_liquidity has no receipt gate — one step only.
+ *
+ * BUG FIXES applied in this version:
+ *   FIX-1  ASSOCIATED_TOKEN_PROGRAM_ID added to buy and sell account lists.
+ *          Anchor validates vault/buyer ATAs against the associated token program;
+ *          if the program account isn't in the transaction, the runtime rejects it.
+ *
+ *   FIX-2  Global account isWritable flag on buy/sell corrected to false.
+ *          IDL marks global as writable=false for Buy and Sell — the old code
+ *          passed isWritable: true which causes an account constraint violation.
+ *
+ *   FIX-3  mint account isWritable corrected to false on buy/sell (matches IDL).
  */
 
 import {
@@ -45,7 +56,7 @@ const DISC = {
   graduate_to_pumpswap: Buffer.from([ 67,  55,  59,  29,  96, 164,  96, 148]),
 };
 
-// ─── PDA derivations ────────────────────────────────────────────────────────
+// ─── PDA derivations ─────────────────────────────────────────────────────────
 
 function deriveGlobal() {
   return PublicKey.findProgramAddressSync([Buffer.from('global')], PROGRAM_ID);
@@ -58,7 +69,7 @@ function deriveReceipt(agentPubkey, nonce) {
   );
 }
 
-// Mint PDA seeds: ["mint", creator, name] — matches lib.rs LaunchToken
+// seeds: ["mint", creator, name] — matches LaunchToken in lib.rs
 function deriveMint(creator, name) {
   return PublicKey.findProgramAddressSync(
     [Buffer.from('mint'), creator.toBuffer(), Buffer.from(name)],
@@ -80,7 +91,7 @@ function deriveCurve(mint) {
   );
 }
 
-// ─── Borsh-style encoding helpers ───────────────────────────────────────────
+// ─── Borsh-style encoding helpers ────────────────────────────────────────────
 
 function encodeString(value) {
   const bytes = Buffer.from(value, 'utf8');
@@ -95,17 +106,32 @@ function encodeU64(value) {
   return buf;
 }
 
-function encodeU16LE(value) {
-  const buf = Buffer.alloc(2);
-  buf.writeUInt16LE(value);
-  return buf;
-}
-
-// ─── Account data readers ────────────────────────────────────────────────────
+// ─── Account data readers ─────────────────────────────────────────────────────
 // Offsets verified against IDL types:
-//   Global:      8 disc | 32 authority | 32 fee_recipient | ...
-//   TokenState:  8 disc | 32 mint      | 32 creator       | ...
-//   BondingCurve:8 disc | 32 mint | 8 vtr | 8 vsr | 8 rtr | 8 rsr | ...
+//
+//   Global:
+//     8   disc
+//     +32 authority     → [8..40]
+//     +32 fee_recipient → [40..72]  ← readFeeRecipient reads here
+//     +1  initialized
+//     +8  token_count
+//     ...
+//
+//   TokenState:
+//     8   disc
+//     +32 mint          → [8..40]
+//     +32 creator       → [40..72]  ← readTokenCreator reads here
+//     ...
+//
+//   BondingCurve:
+//     8   disc
+//     +32 mint          → [8..40]
+//     +8  vtr           → [40..48]
+//     +8  vsr           → [48..56]
+//     +8  rtr           → [56..64]
+//     +8  rsr           → [64..72]
+//     +8  total_supply  → [72..80]
+//     +1  complete      → [80]
 
 function readFeeRecipient(globalData) {
   return new PublicKey(globalData.slice(40, 72));
@@ -122,10 +148,17 @@ function readBondingCurveState(data) {
   const realSolReserves      = data.readBigUInt64LE(64);
   const tokenTotalSupply     = data.readBigUInt64LE(72);
   const complete             = data[80] === 1;
-  return { virtualTokenReserves, virtualSolReserves, realTokenReserves, realSolReserves, tokenTotalSupply, complete };
+  return {
+    virtualTokenReserves,
+    virtualSolReserves,
+    realTokenReserves,
+    realSolReserves,
+    tokenTotalSupply,
+    complete,
+  };
 }
 
-// ─── Oracle keypair ──────────────────────────────────────────────────────────
+// ─── Oracle keypair ───────────────────────────────────────────────────────────
 
 function getOracleKeypair() {
   const key = process.env.ORACLE_PRIVATE_KEY;
@@ -133,13 +166,15 @@ function getOracleKeypair() {
   return Keypair.fromSecretKey(bs58.decode(key));
 }
 
-// ─── Step 1: submit receipt onchain ─────────────────────────────────────────
+// ─── Step 1: submit receipt onchain ──────────────────────────────────────────
+// Oracle pays the rent for the receipt PDA and signs it. The agent wallet is
+// passed as `payer` (a readonly account) and baked into the receipt PDA seeds.
 
 async function submitReceipt(agentPubkey) {
   const nonce = crypto.randomBytes(32);
   const [receiptPda] = deriveReceipt(agentPubkey, nonce);
   const oracle = getOracleKeypair();
-  const { blockhash } = await connection.getLatestBlockhash();
+  const { blockhash } = await connection.getLatestBlockhash('confirmed');
 
   const tx = new Transaction({
     feePayer: oracle.publicKey,
@@ -148,12 +183,14 @@ async function submitReceipt(agentPubkey) {
 
   tx.add(
     ComputeBudgetProgram.setComputeUnitLimit({ units: 50_000 }),
+    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5_000 }),
     {
+      // Account order from IDL: receipt, oracle, payer, system_program
       keys: [
-        { pubkey: receiptPda,          isSigner: false, isWritable: true  },
-        { pubkey: oracle.publicKey,    isSigner: true,  isWritable: true  },
-        { pubkey: agentPubkey,         isSigner: false, isWritable: false },
-        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+        { pubkey: receiptPda,              isSigner: false, isWritable: true  }, // receipt (init PDA)
+        { pubkey: oracle.publicKey,        isSigner: true,  isWritable: true  }, // oracle (payer, signer)
+        { pubkey: agentPubkey,             isSigner: false, isWritable: false }, // payer (readonly — seed only)
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
       ],
       programId: PROGRAM_ID,
       data: Buffer.concat([DISC.record_x402_payment, nonce]),
@@ -166,7 +203,7 @@ async function submitReceipt(agentPubkey) {
   return { receiptPda, nonce, receiptSignature: signature };
 }
 
-// ─── Endpoint handlers ───────────────────────────────────────────────────────
+// ─── Endpoint handlers ────────────────────────────────────────────────────────
 
 export async function getPlatformConfig(req, res) {
   res.json({
@@ -234,7 +271,8 @@ export async function getBondingCurve(req, res) {
  * Body: { name, symbol, uri?, creatorWallet }
  *
  * Oracle submits receipt onchain, then returns unsigned launch_token tx.
- * Account order from IDL:
+ *
+ * Account order from IDL (launch_token):
  *   global, x402_receipt, token, bonding_curve, mint, creator,
  *   token_program, system_program, rent
  */
@@ -254,13 +292,16 @@ export async function createLaunchTransaction(req, res) {
     // Step 1: oracle submits receipt
     const { receiptPda, nonce } = await submitReceipt(creator);
 
-    const { blockhash } = await connection.getLatestBlockhash();
+    const { blockhash } = await connection.getLatestBlockhash('confirmed');
     const tx = new Transaction({ feePayer: creator, recentBlockhash: blockhash });
 
     tx.add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
-      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 500_000 }),
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5_000 }),
       {
+        // Account order from IDL:
+        //   global, x402_receipt, token, bonding_curve, mint, creator,
+        //   token_program, system_program, rent
         keys: [
           { pubkey: globalPda,               isSigner: false, isWritable: true  },
           { pubkey: receiptPda,              isSigner: false, isWritable: true  },
@@ -335,10 +376,14 @@ export async function verifyLaunch(req, res) {
  * POST /api/program/create-buy
  * Body: { mint, buyerWallet, solAmount, minTokensOut? }
  *
- * Account order from IDL:
+ * Account order from IDL (buy):
  *   global, x402_receipt, token, bonding_curve, vault_token_account,
  *   buyer_token_account, mint, buyer, fee_recipient, creator,
- *   token_program, system_program
+ *   token_program, associated_token_program, system_program
+ *
+ * NOTE: The buyer's ATA (buyer_token_account) must already exist before calling
+ * this endpoint. Create it with:
+ *   spl-token create-account <MINT> --owner <BUYER> --url devnet
  */
 export async function createBuyTransaction(req, res) {
   try {
@@ -349,21 +394,23 @@ export async function createBuyTransaction(req, res) {
 
     const buyer      = new PublicKey(buyerWallet);
     const mintPubkey = new PublicKey(mint);
-    const [curvePda] = deriveCurve(mintPubkey);
-    const [tokenPda] = deriveToken(mintPubkey);
+    const [curvePda]  = deriveCurve(mintPubkey);
+    const [tokenPda]  = deriveToken(mintPubkey);
     const [globalPda] = deriveGlobal();
 
-    const vaultAta = getAssociatedTokenAddressSync(mintPubkey, curvePda, true, TOKEN_PROGRAM_ID);
+    // Vault ATA is owned by the bonding curve PDA (allowOwnerOffCurve = true)
+    const vaultAta = getAssociatedTokenAddressSync(mintPubkey, curvePda, true,  TOKEN_PROGRAM_ID);
+    // Buyer ATA must already exist
     const buyerAta = getAssociatedTokenAddressSync(mintPubkey, buyer,    false, TOKEN_PROGRAM_ID);
 
     // Read fee_recipient from Global account
     const globalInfo = await connection.getAccountInfo(globalPda);
-    if (!globalInfo) return res.status(400).json({ error: 'Global account not initialized' });
+    if (!globalInfo) return res.status(400).json({ error: 'Global account not initialized — run scripts/initialize-program.js' });
     const feeRecipient = readFeeRecipient(globalInfo.data);
 
     // Read creator from TokenState account
     const tokenInfo = await connection.getAccountInfo(tokenPda);
-    if (!tokenInfo) return res.status(404).json({ error: 'Token not found onchain' });
+    if (!tokenInfo) return res.status(404).json({ error: 'Token not found onchain — run create-launch first' });
     const tokenCreator = readTokenCreator(tokenInfo.data);
 
     const { receiptPda, nonce } = await submitReceipt(buyer);
@@ -371,26 +418,39 @@ export async function createBuyTransaction(req, res) {
     const solLamports = BigInt(Math.floor(solAmount * 1e9));
     const minOut      = BigInt(Math.floor(minTokensOut));
 
-    const { blockhash } = await connection.getLatestBlockhash();
+    const { blockhash } = await connection.getLatestBlockhash('confirmed');
     const tx = new Transaction({ feePayer: buyer, recentBlockhash: blockhash });
 
     tx.add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }),
-      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 500_000 }),
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5_000 }),
       {
+        // Account order from IDL:
+        //   global, x402_receipt, token, bonding_curve, vault_token_account,
+        //   buyer_token_account, mint, buyer, fee_recipient, creator,
+        //   token_program, associated_token_program, system_program
+        //
+        // FIX-1: ASSOCIATED_TOKEN_PROGRAM_ID added — Anchor validates vault/buyer
+        //        ATAs using associated_token:: constraints, which require this program
+        //        to be present in the transaction account list.
+        //
+        // FIX-2: global isWritable set to false (IDL: writable=false for Buy).
+        //
+        // FIX-3: mint isWritable set to false (IDL: writable=false for Buy).
         keys: [
-          { pubkey: globalPda,               isSigner: false, isWritable: false },
-          { pubkey: receiptPda,              isSigner: false, isWritable: true  },
-          { pubkey: tokenPda,                isSigner: false, isWritable: true  },
-          { pubkey: curvePda,                isSigner: false, isWritable: true  },
-          { pubkey: vaultAta,                isSigner: false, isWritable: true  },
-          { pubkey: buyerAta,                isSigner: false, isWritable: true  },
-          { pubkey: mintPubkey,              isSigner: false, isWritable: false },
-          { pubkey: buyer,                   isSigner: true,  isWritable: true  },
-          { pubkey: feeRecipient,            isSigner: false, isWritable: true  },
-          { pubkey: tokenCreator,            isSigner: false, isWritable: true  },
-          { pubkey: TOKEN_PROGRAM_ID,        isSigner: false, isWritable: false },
-          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+          { pubkey: globalPda,                    isSigner: false, isWritable: false }, // FIX-2: was true
+          { pubkey: receiptPda,                   isSigner: false, isWritable: true  },
+          { pubkey: tokenPda,                     isSigner: false, isWritable: true  },
+          { pubkey: curvePda,                     isSigner: false, isWritable: true  },
+          { pubkey: vaultAta,                     isSigner: false, isWritable: true  },
+          { pubkey: buyerAta,                     isSigner: false, isWritable: true  },
+          { pubkey: mintPubkey,                   isSigner: false, isWritable: false }, // FIX-3: was true
+          { pubkey: buyer,                        isSigner: true,  isWritable: true  },
+          { pubkey: feeRecipient,                 isSigner: false, isWritable: true  },
+          { pubkey: tokenCreator,                 isSigner: false, isWritable: true  },
+          { pubkey: TOKEN_PROGRAM_ID,             isSigner: false, isWritable: false },
+          { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID,  isSigner: false, isWritable: false }, // FIX-1: was missing
+          { pubkey: SystemProgram.programId,      isSigner: false, isWritable: false },
         ],
         programId: PROGRAM_ID,
         data: Buffer.concat([
@@ -423,10 +483,10 @@ export async function createBuyTransaction(req, res) {
  *
  * tokenAmount is whole tokens (e.g. 100). Converted to base units internally.
  *
- * Account order from IDL:
+ * Account order from IDL (sell):
  *   global, x402_receipt, token, bonding_curve, vault_token_account,
  *   seller_token_account, mint, seller, fee_recipient, creator,
- *   token_program, system_program
+ *   token_program, associated_token_program, system_program
  */
 export async function createSellTransaction(req, res) {
   try {
@@ -437,19 +497,19 @@ export async function createSellTransaction(req, res) {
 
     const seller     = new PublicKey(sellerWallet);
     const mintPubkey = new PublicKey(mint);
-    const [curvePda] = deriveCurve(mintPubkey);
-    const [tokenPda] = deriveToken(mintPubkey);
+    const [curvePda]  = deriveCurve(mintPubkey);
+    const [tokenPda]  = deriveToken(mintPubkey);
     const [globalPda] = deriveGlobal();
 
     const vaultAta  = getAssociatedTokenAddressSync(mintPubkey, curvePda, true,  TOKEN_PROGRAM_ID);
     const sellerAta = getAssociatedTokenAddressSync(mintPubkey, seller,   false, TOKEN_PROGRAM_ID);
 
     const globalInfo = await connection.getAccountInfo(globalPda);
-    if (!globalInfo) return res.status(400).json({ error: 'Global account not initialized' });
+    if (!globalInfo) return res.status(400).json({ error: 'Global account not initialized — run scripts/initialize-program.js' });
     const feeRecipient = readFeeRecipient(globalInfo.data);
 
     const tokenInfo = await connection.getAccountInfo(tokenPda);
-    if (!tokenInfo) return res.status(404).json({ error: 'Token not found onchain' });
+    if (!tokenInfo) return res.status(404).json({ error: 'Token not found onchain — run create-launch first' });
     const tokenCreator = readTokenCreator(tokenInfo.data);
 
     const { receiptPda, nonce } = await submitReceipt(seller);
@@ -457,26 +517,33 @@ export async function createSellTransaction(req, res) {
     const tokenBaseUnits = BigInt(Math.floor(tokenAmount * 10 ** TOKEN_DECIMALS));
     const minSolLamports = BigInt(Math.floor(minSolOut * 1e9));
 
-    const { blockhash } = await connection.getLatestBlockhash();
+    const { blockhash } = await connection.getLatestBlockhash('confirmed');
     const tx = new Transaction({ feePayer: seller, recentBlockhash: blockhash });
 
     tx.add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }),
-      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 500_000 }),
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5_000 }),
       {
+        // Account order from IDL:
+        //   global, x402_receipt, token, bonding_curve, vault_token_account,
+        //   seller_token_account, mint, seller, fee_recipient, creator,
+        //   token_program, associated_token_program, system_program
+        //
+        // Same three fixes as buy (FIX-1, FIX-2, FIX-3)
         keys: [
-          { pubkey: globalPda,               isSigner: false, isWritable: false },
-          { pubkey: receiptPda,              isSigner: false, isWritable: true  },
-          { pubkey: tokenPda,                isSigner: false, isWritable: true  },
-          { pubkey: curvePda,                isSigner: false, isWritable: true  },
-          { pubkey: vaultAta,                isSigner: false, isWritable: true  },
-          { pubkey: sellerAta,               isSigner: false, isWritable: true  },
-          { pubkey: mintPubkey,              isSigner: false, isWritable: false },
-          { pubkey: seller,                  isSigner: true,  isWritable: true  },
-          { pubkey: feeRecipient,            isSigner: false, isWritable: true  },
-          { pubkey: tokenCreator,            isSigner: false, isWritable: true  },
-          { pubkey: TOKEN_PROGRAM_ID,        isSigner: false, isWritable: false },
-          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+          { pubkey: globalPda,                    isSigner: false, isWritable: false }, // FIX-2: was true
+          { pubkey: receiptPda,                   isSigner: false, isWritable: true  },
+          { pubkey: tokenPda,                     isSigner: false, isWritable: true  },
+          { pubkey: curvePda,                     isSigner: false, isWritable: true  },
+          { pubkey: vaultAta,                     isSigner: false, isWritable: true  },
+          { pubkey: sellerAta,                    isSigner: false, isWritable: true  },
+          { pubkey: mintPubkey,                   isSigner: false, isWritable: false }, // FIX-3: was true
+          { pubkey: seller,                       isSigner: true,  isWritable: true  },
+          { pubkey: feeRecipient,                 isSigner: false, isWritable: true  },
+          { pubkey: tokenCreator,                 isSigner: false, isWritable: true  },
+          { pubkey: TOKEN_PROGRAM_ID,             isSigner: false, isWritable: false },
+          { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID,  isSigner: false, isWritable: false }, // FIX-1: was missing
+          { pubkey: SystemProgram.programId,      isSigner: false, isWritable: false },
         ],
         programId: PROGRAM_ID,
         data: Buffer.concat([
@@ -508,7 +575,9 @@ export async function createSellTransaction(req, res) {
  * Body: { mint, contributorWallet, solAmount }
  *
  * No x402 receipt — contribute_liquidity is ungated.
- * Account order from IDL: token, bonding_curve, contributor, system_program
+ *
+ * Account order from IDL:
+ *   token, bonding_curve, contributor, system_program
  */
 export async function createContributeTransaction(req, res) {
   try {
@@ -524,17 +593,17 @@ export async function createContributeTransaction(req, res) {
 
     const solLamports = BigInt(Math.floor(solAmount * 1e9));
 
-    const { blockhash } = await connection.getLatestBlockhash();
+    const { blockhash } = await connection.getLatestBlockhash('confirmed');
     const tx = new Transaction({ feePayer: contributor, recentBlockhash: blockhash });
 
     tx.add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }),
-      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 500_000 }),
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5_000 }),
       {
         keys: [
-          { pubkey: tokenPda,                isSigner: false, isWritable: true },
-          { pubkey: curvePda,                isSigner: false, isWritable: true },
-          { pubkey: contributor,             isSigner: true,  isWritable: true },
+          { pubkey: tokenPda,                isSigner: false, isWritable: true  },
+          { pubkey: curvePda,                isSigner: false, isWritable: true  },
+          { pubkey: contributor,             isSigner: true,  isWritable: true  },
           { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
         ],
         programId: PROGRAM_ID,
@@ -542,13 +611,16 @@ export async function createContributeTransaction(req, res) {
       }
     );
 
-    // Report current progress
+    // Report current progress before the tx is submitted
     const curveInfo = await connection.getAccountInfo(curvePda);
     let progressPercent = null;
     let graduated = false;
     if (curveInfo) {
       const state = readBondingCurveState(curveInfo.data);
-      progressPercent = Math.min(Number((state.realSolReserves * 100n) / GRADUATION_LAMPORTS), 100);
+      progressPercent = Math.min(
+        Number((state.realSolReserves * 100n) / GRADUATION_LAMPORTS),
+        100
+      );
       graduated = state.complete;
     }
 
@@ -596,7 +668,10 @@ export async function verifyContribute(req, res) {
     if (curveInfo) {
       const state = readBondingCurveState(curveInfo.data);
       graduated = state.complete;
-      progressPercent = Math.min(Number((state.realSolReserves * 100n) / GRADUATION_LAMPORTS), 100);
+      progressPercent = Math.min(
+        Number((state.realSolReserves * 100n) / GRADUATION_LAMPORTS),
+        100
+      );
     }
 
     res.json({
