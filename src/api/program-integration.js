@@ -694,7 +694,7 @@ export async function initializeProgram(req, res) {
  transaction.recentBlockhash = blockhash;
  
  transaction.add(
- ComputeBudgetProgram.setComputeUnitLimit({ units: 400000 })
+ ComputeBudgetProgram.setComputeUnitLimit({ units: 1400000 }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1000 })
  );
  
  // Initialize instruction discriminator: sha256("global:initialize")[:8]
