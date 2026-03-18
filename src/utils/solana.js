@@ -1,53 +1,52 @@
 /**
- * Solana Service - On-chain interactions for X402.Fun
- * 
- * Handles real Solana program calls for token launches,
- * buying, selling, and liquidity contributions.
+ * Solana Service - Utility helpers for X402.Fun
+ *
+ * Provides connection, keypair helpers, and balance queries.
+ * Core transaction building lives in src/api/program-integration.js.
  */
 
-import { 
-  Connection, 
-  PublicKey, 
-  Keypair, 
-  Transaction, 
-  SystemProgram
+import {
+  Connection,
+  PublicKey,
+  Keypair,
 } from '@solana/web3.js';
 import bs58 from 'bs58';
 
-// Config
-const PROGRAM_ID = process.env.PROGRAM_ID || '63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHPAVDE7XJF';
-const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
-const CLUSTER = process.env.CLUSTER || 'devnet';
+// Read all config from environment — no hardcoded IDs or fallback addresses
+const PROGRAM_ID = process.env.PROGRAM_ID || '';
+const RPC_URL    = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
+const CLUSTER    = process.env.CLUSTER || 'devnet';
 
-// Initialize connection
-const connection = new Connection(RPC_URL, 'confirmed');
+if (!PROGRAM_ID) {
+  console.warn('⚠️  solana.js: PROGRAM_ID env var not set');
+}
 
-console.log(`🔗 Connected to ${CLUSTER} via ${RPC_URL}`);
-console.log(`📜 Program ID: ${PROGRAM_ID}`);
+export const connection = new Connection(RPC_URL, 'confirmed');
 
 /**
- * Get or create a keypair from base58 private key
+ * Load a Keypair from a base58-encoded private key env variable.
+ * Returns null if the var is missing or invalid.
  */
 export function getKeypairFromEnv(keyName) {
   const privateKeyBase58 = process.env[keyName];
   if (!privateKeyBase58) {
-    console.log(`⚠️  ${keyName} not set in environment`);
+    console.warn(`⚠️  ${keyName} not set in environment`);
     return null;
   }
   try {
-    const bytes = bs58.decode(privateKeyBase58);
-    return Keypair.fromSecretKey(bytes);
+    return Keypair.fromSecretKey(bs58.decode(privateKeyBase58));
   } catch (e) {
-    console.error(`Failed to decode ${keyName}:`, e);
+    console.error(`Failed to decode ${keyName}:`, e.message);
     return null;
   }
 }
 
 /**
- * Get the platform wallet (for receiving fees)
+ * Parse a base58 public key from an env variable.
+ * Returns null if missing or invalid.
  */
 export function getPlatformWallet() {
-  const walletBase58 = process.env.PLATFORM_WALLET;
+  const walletBase58 = process.env.FEE_RECIPIENT || process.env.PLATFORM_WALLET;
   if (!walletBase58) return null;
   try {
     return new PublicKey(walletBase58);
@@ -57,109 +56,74 @@ export function getPlatformWallet() {
 }
 
 /**
- * Create a new mint keypair for a token
- */
-export function createMintKeypair() {
-  return Keypair.generate();
-}
-
-/**
- * Get the mint address from a token launch transaction
+ * Get parsed transaction details.
  */
 export async function getMintFromTransaction(signature) {
   try {
     const tx = await connection.getParsedTransaction(signature, {
-      maxSupportedTransactionVersion: 0
+      maxSupportedTransactionVersion: 0,
     });
-    
     if (!tx) return null;
-    
-    // Find the mint in the transaction logs
     for (const log of tx.meta?.logMessages || []) {
       if (log.includes('InitializeMint')) {
         const match = log.match(/InitializeMint\s+(\w+)/);
         if (match) return match[1];
       }
     }
-    
     return null;
   } catch (e) {
-    console.error('Error getting mint from tx:', e);
+    console.error('Error getting mint from tx:', e.message);
     return null;
   }
 }
 
 /**
- * Get account info for debugging
+ * Get parsed account info.
  */
 export async function getAccountInfo(address) {
   try {
-    const pubkey = new PublicKey(address);
-    const info = await connection.getParsedAccountInfo(pubkey);
+    const info = await connection.getParsedAccountInfo(new PublicKey(address));
     return info.value;
-  } catch (e) {
+  } catch {
     return null;
   }
 }
 
 /**
- * Get program accounts
- */
-export async function getProgramAccounts() {
-  try {
-    const programPubkey = new PublicKey(PROGRAM_ID);
-    const accounts = await connection.getParsedProgramAccounts(programPubkey);
-    return accounts;
-  } catch (e) {
-    console.error('Error getting program accounts:', e);
-    return [];
-  }
-}
-
-/**
- * Get token balance for an address
+ * Get token balance for a wallet.
  */
 export async function getTokenBalance(mintAddress, walletAddress) {
   try {
-    const mint = new PublicKey(mintAddress);
-    const wallet = new PublicKey(walletAddress);
-    
-    const tokenAccount = await connection.getParsedTokenAccountsByOwner(wallet, {
-      mint: mint
-    });
-    
-    if (tokenAccount.value.length === 0) return 0;
-    
-    const balance = tokenAccount.value[0].account.data.parsed.info.tokenAmount.uiAmount;
-    return balance;
-  } catch (e) {
-    console.error('Error getting token balance:', e);
+    const accounts = await connection.getParsedTokenAccountsByOwner(
+      new PublicKey(walletAddress),
+      { mint: new PublicKey(mintAddress) }
+    );
+    if (accounts.value.length === 0) return 0;
+    return accounts.value[0].account.data.parsed.info.tokenAmount.uiAmount;
+  } catch {
     return 0;
   }
 }
 
 /**
- * Get SOL balance
+ * Get SOL balance in SOL (not lamports).
  */
 export async function getSolBalance(address) {
   try {
-    const pubkey = new PublicKey(address);
-    const balance = await connection.getBalance(pubkey);
-    return balance / 1e9;
-  } catch (e) {
-    console.error('Error getting SOL balance:', e);
+    return (await connection.getBalance(new PublicKey(address))) / 1e9;
+  } catch {
     return 0;
   }
 }
 
 /**
- * Get current network cluster info
+ * Return basic network info — used by the /network route.
  */
 export function getNetworkInfo() {
   return {
-    cluster: CLUSTER,
-    rpc: RPC_URL,
-    programId: PROGRAM_ID
+    cluster:   CLUSTER,
+    rpc:       RPC_URL,
+    programId: PROGRAM_ID,
   };
 }
 
@@ -168,11 +132,9 @@ export default {
   PROGRAM_ID,
   getKeypairFromEnv,
   getPlatformWallet,
-  createMintKeypair,
   getMintFromTransaction,
   getAccountInfo,
-  getProgramAccounts,
   getTokenBalance,
   getSolBalance,
-  getNetworkInfo
+  getNetworkInfo,
 };

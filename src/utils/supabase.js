@@ -1,13 +1,18 @@
 // Supabase client for X402.Fun
+// Configure SUPABASE_URL and SUPABASE_ANON_KEY in your .env file.
+// If not configured, tokens.js falls back to in-memory storage.
 
-import { createClient } from '@supabase/supabase-js'
+import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.SUPABASE_URL || 'https://utjjvgsfmmhssiffjpgo.supabase.co'
-const supabaseKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV0amp2Z3NmbW1oc3NpZmZqcGdvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzgxMTc2MDAsImV4cCI6MjA1MzY5MzYwMH0.Z8LHS6JsJ0d5gzYeNB-I0tFDEO2YqN4aqRVKyTaXUI4'
+const supabaseUrl = process.env.SUPABASE_URL  || '';
+const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
 
-export const supabase = createClient(supabaseUrl, supabaseKey)
+// Only create client if both values are present
+export const supabase = (supabaseUrl && supabaseKey)
+  ? createClient(supabaseUrl, supabaseKey)
+  : null;
 
-// Helper to check if Supabase is configured
+// Helper checked by tokens.js before any DB call
 export function isSupabaseConfigured() {
-  return supabaseUrl && supabaseKey && supabaseUrl !== 'your-supabase-url'
+  return !!(supabaseUrl && supabaseKey);
 }
