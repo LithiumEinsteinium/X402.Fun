@@ -13,6 +13,7 @@ config/secrets.json
 keys/
 *.json.key
 pem/
+*-keypair.json
 
 # IDE
 .vscode/
