@@ -1,0 +1,56 @@
+# ── Node.js ───────────────────────────────────────────────────────────────────
+node_modules/
+package-lock.json
+
+# ── Environment variables ─────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.env
+
+# ── Solana / Anchor keypairs and secrets ──────────────────────────────────────
+# Never commit private keys — losing upgrade authority = losing the program
+*-keypair.json
+id.json
+wallet.json
+keys/
+pem/
+*.json.key
+config/secrets.json
+
+# ── Rust / Anchor build output ────────────────────────────────────────────────
+# target/ contains compiled .so binaries, IDL files, and incremental build
+# artifacts. It is large (100MB+) and fully reproducible via `anchor build`.
+target/
+
+# Anchor local state — created by `anchor test` and `anchor localnet`
+.anchor/
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Build output ──────────────────────────────────────────────────────────────
+dist/
+build/
+
+# ── Test artifacts ────────────────────────────────────────────────────────────
+coverage/
+
+# ── Temporary files ───────────────────────────────────────────────────────────
+tmp/
+temp/
+*.tmp
