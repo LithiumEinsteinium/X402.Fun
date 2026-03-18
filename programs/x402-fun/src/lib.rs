@@ -535,14 +535,15 @@ pub struct LaunchToken<'info> {
 #[derive(Accounts)]
 #[instruction(sol_amount: u64, min_tokens_out: u64, nonce: [u8; 32])]
 pub struct Buy<'info> {
+    // Boxed to keep Buy::try_accounts stack frame under the 4096-byte BPF limit.
     #[account(seeds = [b"global"], bump)]
-    pub global: Account<'info, Global>,
+    pub global: Box<Account<'info, Global>>,
     #[account(mut, seeds = [b"x402", buyer.key().as_ref(), nonce.as_ref()], bump = x402_receipt.bump, constraint = x402_receipt.payer == buyer.key())]
-    pub x402_receipt: Account<'info, X402Receipt>,
+    pub x402_receipt: Box<Account<'info, X402Receipt>>,
     #[account(mut, seeds = [b"token", bonding_curve.mint.as_ref()], bump = token.bump)]
-    pub token: Account<'info, TokenState>,
+    pub token: Box<Account<'info, TokenState>>,
     #[account(mut, seeds = [b"curve", bonding_curve.mint.as_ref()], bump = bonding_curve.bump)]
-    pub bonding_curve: Account<'info, BondingCurve>,
+    pub bonding_curve: Box<Account<'info, BondingCurve>>,
     #[account(mut, associated_token::mint = mint, associated_token::authority = bonding_curve, associated_token::token_program = token_program)]
     pub vault_token_account: InterfaceAccount<'info, TokenAccount>,
     #[account(mut, associated_token::mint = mint, associated_token::authority = buyer, associated_token::token_program = token_program)]
@@ -563,14 +564,15 @@ pub struct Buy<'info> {
 #[derive(Accounts)]
 #[instruction(token_amount: u64, min_sol_out: u64, nonce: [u8; 32])]
 pub struct Sell<'info> {
+    // Boxed to keep Sell::try_accounts stack frame under the 4096-byte BPF limit.
     #[account(seeds = [b"global"], bump)]
-    pub global: Account<'info, Global>,
+    pub global: Box<Account<'info, Global>>,
     #[account(mut, seeds = [b"x402", seller.key().as_ref(), nonce.as_ref()], bump = x402_receipt.bump, constraint = x402_receipt.payer == seller.key())]
-    pub x402_receipt: Account<'info, X402Receipt>,
+    pub x402_receipt: Box<Account<'info, X402Receipt>>,
     #[account(mut, seeds = [b"token", bonding_curve.mint.as_ref()], bump = token.bump)]
-    pub token: Account<'info, TokenState>,
+    pub token: Box<Account<'info, TokenState>>,
     #[account(mut, seeds = [b"curve", bonding_curve.mint.as_ref()], bump = bonding_curve.bump)]
-    pub bonding_curve: Account<'info, BondingCurve>,
+    pub bonding_curve: Box<Account<'info, BondingCurve>>,
     #[account(mut, associated_token::mint = mint, associated_token::authority = bonding_curve, associated_token::token_program = token_program)]
     pub vault_token_account: InterfaceAccount<'info, TokenAccount>,
     #[account(mut, associated_token::mint = mint, associated_token::authority = seller, associated_token::token_program = token_program)]
