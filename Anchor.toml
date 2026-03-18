@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-x402_fun = "63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF"
+x402_fun = "NEW_PROGRAM_ID"
 
 [programs.mainnet]
-x402_fun = "63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF"
+x402_fun = "NEW_PROGRAM_ID"
 
 [registry]
 url = "https://api.apr.dev"
