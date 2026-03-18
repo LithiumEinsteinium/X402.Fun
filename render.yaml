@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: x402-fun
+    runtime: node
+    region: oregon
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: PROGRAM_ID
+        sync: false
+      - key: ORACLE_PRIVATE_KEY
+        sync: false
+      - key: SOLANA_RPC_URL
+        value: https://api.devnet.solana.com
+      - key: CLUSTER
+        value: devnet
+      - key: FEE_RECIPIENT
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHANNEL
+        sync: false
+      - key: PUMPFUN_PROGRAM_ID
+        value: 6EF8rrecth5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P
+      - key: PUMPSWAP_PROGRAM_ID
+        value: pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA
