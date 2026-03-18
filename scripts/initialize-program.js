@@ -28,7 +28,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const PROGRAM_ID = new PublicKey('63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF');
+const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || 'NEW_PROGRAM_ID');
 const RPC_URL = process.env.RPC_URL || 'https://api.devnet.solana.com';
 const connection = new Connection(RPC_URL, 'confirmed');
 
