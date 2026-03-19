@@ -142,6 +142,7 @@ POST /api/program/create-launch
   "success": true,
   "mint": "<mint PDA pubkey>",
   "bondingCurve": "<bonding curve PDA pubkey>",
+  "vaultTokenAccount": "<vault ATA pubkey>",
   "tokenState": "<token state PDA pubkey>",
   "receiptPda": "<x402 receipt PDA pubkey>",
   "nonce": "<32-byte hex string>",
@@ -151,6 +152,9 @@ POST /api/program/create-launch
 ```
 
 **Save the `mint` address — you need it for all future buy/sell/contribute calls.**
+
+> The `vaultTokenAccount` (the bonding curve's token vault) is created automatically
+> inside this transaction. You do not need to create it separately.
 
 ### 3b. Sign and submit the transaction
 
@@ -199,9 +203,10 @@ POST /api/program/verify-launch
 
 ## Step 4 — Buy Tokens
 
-### Important: Create your token ATA first
+### Important: Create your buyer ATA first
 
-Before buying, your Associated Token Account for the mint must exist:
+Before buying, **your** Associated Token Account for the mint must exist.
+The bonding curve's vault ATA is created automatically during launch — you only need your own.
 
 ```bash
 spl-token create-account <MINT_PUBKEY> --owner <YOUR_WALLET> --url devnet
