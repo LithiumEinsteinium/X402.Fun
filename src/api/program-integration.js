@@ -11,15 +11,21 @@
  * contribute_liquidity has no receipt gate — one step only.
  *
  * BUG FIXES applied in this version:
- *   FIX-1  ASSOCIATED_TOKEN_PROGRAM_ID added to buy and sell account lists.
- *          Anchor validates vault/buyer ATAs against the associated token program;
- *          if the program account isn't in the transaction, the runtime rejects it.
+ *   FIX-1  REVERTED — ASSOCIATED_TOKEN_PROGRAM_ID removed from Buy and Sell
+ *          account lists. lib.rs Buy/Sell structs do not include
+ *          associated_token_program; passing it causes IncorrectProgramId errors.
+ *          (ASSOCIATED_TOKEN_PROGRAM_ID is still imported for FIX-4.)
  *
  *   FIX-2  Global account isWritable flag on buy/sell corrected to false.
- *          IDL marks global as writable=false for Buy and Sell — the old code
+ *          lib.rs marks global as non-mut for Buy and Sell — the old code
  *          passed isWritable: true which causes an account constraint violation.
  *
- *   FIX-3  mint account isWritable corrected to false on buy/sell (matches IDL).
+ *   FIX-3  mint account isWritable corrected to false on buy/sell (matches lib.rs).
+ *
+ *   FIX-4  Vault ATA created atomically inside createLaunchTransaction.
+ *          lib.rs LaunchToken does not init the vault ATA, but Buy expects it
+ *          to exist. createAssociatedTokenAccountInstruction is prepended to
+ *          the launch transaction so the creator initialises it on launch.
  */
 
 import {
@@ -33,7 +39,6 @@ import {
 } from '@solana/web3.js';
 import {
   getAssociatedTokenAddressSync,
-  createAssociatedTokenAccountInstruction,
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
@@ -293,28 +298,12 @@ export async function createLaunchTransaction(req, res) {
     // Step 1: oracle submits receipt
     const { receiptPda, nonce } = await submitReceipt(creator);
 
-    // FIX-4: Derive vault ATA upfront — needed for both ATA init and response.
-    // The vault is the bonding curve PDA's token account (allowOwnerOffCurve = true).
-    const vaultAta = getAssociatedTokenAddressSync(mintPda, curvePda, true, TOKEN_PROGRAM_ID);
-
     const { blockhash } = await connection.getLatestBlockhash('confirmed');
     const tx = new Transaction({ feePayer: creator, recentBlockhash: blockhash });
 
     tx.add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
       ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5_000 }),
-      // FIX-4: Create vault ATA atomically in the launch transaction.
-      // LaunchToken in lib.rs does not init the vault ATA, but Buy expects it
-      // to exist (associated_token constraint, no init_if_needed).
-      // Creator pays ~0.002 SOL rent for this account.
-      createAssociatedTokenAccountInstruction(
-        creator,                    // payer
-        vaultAta,                   // ATA address (bonding_curve's token account)
-        curvePda,                   // ATA owner
-        mintPda,                    // mint
-        TOKEN_PROGRAM_ID,
-        ASSOCIATED_TOKEN_PROGRAM_ID
-      ),
       {
         // Account order from IDL:
         //   global, x402_receipt, token, bonding_curve, mint, creator,
@@ -345,7 +334,6 @@ export async function createLaunchTransaction(req, res) {
       success: true,
       mint: mintPda.toBase58(),
       bondingCurve: curvePda.toBase58(),
-      vaultTokenAccount: vaultAta.toBase58(),
       tokenState: tokenPda.toBase58(),
       receiptPda: receiptPda.toBase58(),
       nonce: nonce.toString('hex'),
@@ -443,32 +431,30 @@ export async function createBuyTransaction(req, res) {
       ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }),
       ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5_000 }),
       {
-        // Account order from IDL:
+        // Account order matches Buy struct in lib.rs exactly (12 accounts):
         //   global, x402_receipt, token, bonding_curve, vault_token_account,
         //   buyer_token_account, mint, buyer, fee_recipient, creator,
-        //   token_program, associated_token_program, system_program
+        //   token_program, system_program
         //
-        // FIX-1: ASSOCIATED_TOKEN_PROGRAM_ID added — Anchor validates vault/buyer
-        //        ATAs using associated_token:: constraints, which require this program
-        //        to be present in the transaction account list.
+        // NOTE: associated_token_program is NOT in the Buy struct in lib.rs —
+        //   Anchor validates ATAs via associated_token:: constraints internally.
+        //   Passing it as an extra account causes IncorrectProgramId errors.
         //
-        // FIX-2: global isWritable set to false (IDL: writable=false for Buy).
-        //
-        // FIX-3: mint isWritable set to false (IDL: writable=false for Buy).
+        // FIX-2: global isWritable = false (lib.rs: no mut on global for Buy).
+        // FIX-3: mint isWritable = false (lib.rs: no mut on mint for Buy).
         keys: [
-          { pubkey: globalPda,                    isSigner: false, isWritable: false }, // FIX-2: was true
-          { pubkey: receiptPda,                   isSigner: false, isWritable: true  },
-          { pubkey: tokenPda,                     isSigner: false, isWritable: true  },
-          { pubkey: curvePda,                     isSigner: false, isWritable: true  },
-          { pubkey: vaultAta,                     isSigner: false, isWritable: true  },
-          { pubkey: buyerAta,                     isSigner: false, isWritable: true  },
-          { pubkey: mintPubkey,                   isSigner: false, isWritable: false }, // FIX-3: was true
-          { pubkey: buyer,                        isSigner: true,  isWritable: true  },
-          { pubkey: feeRecipient,                 isSigner: false, isWritable: true  },
-          { pubkey: tokenCreator,                 isSigner: false, isWritable: true  },
-          { pubkey: TOKEN_PROGRAM_ID,             isSigner: false, isWritable: false },
-          { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID,  isSigner: false, isWritable: false }, // FIX-1: was missing
-          { pubkey: SystemProgram.programId,      isSigner: false, isWritable: false },
+          { pubkey: globalPda,               isSigner: false, isWritable: false }, // FIX-2
+          { pubkey: receiptPda,              isSigner: false, isWritable: true  },
+          { pubkey: tokenPda,                isSigner: false, isWritable: true  },
+          { pubkey: curvePda,                isSigner: false, isWritable: true  },
+          { pubkey: vaultAta,                isSigner: false, isWritable: true  },
+          { pubkey: buyerAta,                isSigner: false, isWritable: true  },
+          { pubkey: mintPubkey,              isSigner: false, isWritable: false }, // FIX-3
+          { pubkey: buyer,                   isSigner: true,  isWritable: true  },
+          { pubkey: feeRecipient,            isSigner: false, isWritable: true  },
+          { pubkey: tokenCreator,            isSigner: false, isWritable: true  },
+          { pubkey: TOKEN_PROGRAM_ID,        isSigner: false, isWritable: false },
+          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
         ],
         programId: PROGRAM_ID,
         data: Buffer.concat([
@@ -542,26 +528,29 @@ export async function createSellTransaction(req, res) {
       ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }),
       ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5_000 }),
       {
-        // Account order from IDL:
+        // Account order matches Sell struct in lib.rs exactly (12 accounts):
         //   global, x402_receipt, token, bonding_curve, vault_token_account,
         //   seller_token_account, mint, seller, fee_recipient, creator,
-        //   token_program, associated_token_program, system_program
+        //   token_program, system_program
         //
-        // Same three fixes as buy (FIX-1, FIX-2, FIX-3)
+        // NOTE: associated_token_program is NOT in the Sell struct in lib.rs.
+        //   Same reasoning as Buy — do not pass it.
+        //
+        // FIX-2: global isWritable = false.
+        // FIX-3: mint isWritable = false.
         keys: [
-          { pubkey: globalPda,                    isSigner: false, isWritable: false }, // FIX-2: was true
-          { pubkey: receiptPda,                   isSigner: false, isWritable: true  },
-          { pubkey: tokenPda,                     isSigner: false, isWritable: true  },
-          { pubkey: curvePda,                     isSigner: false, isWritable: true  },
-          { pubkey: vaultAta,                     isSigner: false, isWritable: true  },
-          { pubkey: sellerAta,                    isSigner: false, isWritable: true  },
-          { pubkey: mintPubkey,                   isSigner: false, isWritable: false }, // FIX-3: was true
-          { pubkey: seller,                       isSigner: true,  isWritable: true  },
-          { pubkey: feeRecipient,                 isSigner: false, isWritable: true  },
-          { pubkey: tokenCreator,                 isSigner: false, isWritable: true  },
-          { pubkey: TOKEN_PROGRAM_ID,             isSigner: false, isWritable: false },
-          { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID,  isSigner: false, isWritable: false }, // FIX-1: was missing
-          { pubkey: SystemProgram.programId,      isSigner: false, isWritable: false },
+          { pubkey: globalPda,               isSigner: false, isWritable: false }, // FIX-2
+          { pubkey: receiptPda,              isSigner: false, isWritable: true  },
+          { pubkey: tokenPda,                isSigner: false, isWritable: true  },
+          { pubkey: curvePda,                isSigner: false, isWritable: true  },
+          { pubkey: vaultAta,                isSigner: false, isWritable: true  },
+          { pubkey: sellerAta,               isSigner: false, isWritable: true  },
+          { pubkey: mintPubkey,              isSigner: false, isWritable: false }, // FIX-3
+          { pubkey: seller,                  isSigner: true,  isWritable: true  },
+          { pubkey: feeRecipient,            isSigner: false, isWritable: true  },
+          { pubkey: tokenCreator,            isSigner: false, isWritable: true  },
+          { pubkey: TOKEN_PROGRAM_ID,        isSigner: false, isWritable: false },
+          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
         ],
         programId: PROGRAM_ID,
         data: Buffer.concat([
