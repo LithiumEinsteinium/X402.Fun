@@ -17,8 +17,7 @@
  *          (ASSOCIATED_TOKEN_PROGRAM_ID is still imported for FIX-4.)
  *
  *   FIX-2  Global account isWritable flag on buy/sell corrected to false.
- *          lib.rs marks global as non-mut for Buy and Sell — the old code
- *          passed isWritable: true which causes an account constraint violation.
+ *          lib.rs marks global as non-mut for Buy and Sell.
  *
  *   FIX-3  mint account isWritable corrected to false on buy/sell (matches lib.rs).
  *
@@ -39,6 +38,7 @@ import {
 } from '@solana/web3.js';
 import {
   getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountInstruction,
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
@@ -298,12 +298,28 @@ export async function createLaunchTransaction(req, res) {
     // Step 1: oracle submits receipt
     const { receiptPda, nonce } = await submitReceipt(creator);
 
+    // FIX-4: Derive vault ATA — bonding curve's token account (allowOwnerOffCurve = true).
+    // Must be created before anyone can buy. We create it atomically here so the
+    // creator doesn't need a separate step and buy never hits AccountNotInitialized.
+    const vaultAta = getAssociatedTokenAddressSync(mintPda, curvePda, true, TOKEN_PROGRAM_ID);
+
     const { blockhash } = await connection.getLatestBlockhash('confirmed');
     const tx = new Transaction({ feePayer: creator, recentBlockhash: blockhash });
 
     tx.add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
       ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5_000 }),
+      // FIX-4: Create vault ATA as first instruction — before launch_token.
+      // LaunchToken in lib.rs has no vault_token_account field (no init_if_needed).
+      // Without this, Buy fails with AccountNotInitialized on vault_token_account.
+      createAssociatedTokenAccountInstruction(
+        creator,                    // payer (~0.002 SOL rent)
+        vaultAta,                   // vault ATA address
+        curvePda,                   // ATA owner (bonding curve PDA)
+        mintPda,                    // mint
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      ),
       {
         // Account order from IDL:
         //   global, x402_receipt, token, bonding_curve, mint, creator,
@@ -334,6 +350,7 @@ export async function createLaunchTransaction(req, res) {
       success: true,
       mint: mintPda.toBase58(),
       bondingCurve: curvePda.toBase58(),
+      vaultTokenAccount: vaultAta.toBase58(),
       tokenState: tokenPda.toBase58(),
       receiptPda: receiptPda.toBase58(),
       nonce: nonce.toString('hex'),
@@ -436,12 +453,10 @@ export async function createBuyTransaction(req, res) {
         //   buyer_token_account, mint, buyer, fee_recipient, creator,
         //   token_program, system_program
         //
-        // NOTE: associated_token_program is NOT in the Buy struct in lib.rs —
-        //   Anchor validates ATAs via associated_token:: constraints internally.
-        //   Passing it as an extra account causes IncorrectProgramId errors.
-        //
-        // FIX-2: global isWritable = false (lib.rs: no mut on global for Buy).
-        // FIX-3: mint isWritable = false (lib.rs: no mut on mint for Buy).
+        // FIX-1 REVERTED: associated_token_program is NOT in lib.rs Buy struct.
+        //   Passing it shifts all subsequent accounts causing IncorrectProgramId.
+        // FIX-2: global isWritable = false (no #[account(mut)] on global in Buy).
+        // FIX-3: mint isWritable = false (no #[account(mut)] on mint in Buy).
         keys: [
           { pubkey: globalPda,               isSigner: false, isWritable: false }, // FIX-2
           { pubkey: receiptPda,              isSigner: false, isWritable: true  },
@@ -533,9 +548,7 @@ export async function createSellTransaction(req, res) {
         //   seller_token_account, mint, seller, fee_recipient, creator,
         //   token_program, system_program
         //
-        // NOTE: associated_token_program is NOT in the Sell struct in lib.rs.
-        //   Same reasoning as Buy — do not pass it.
-        //
+        // FIX-1 REVERTED: associated_token_program NOT in lib.rs Sell struct.
         // FIX-2: global isWritable = false.
         // FIX-3: mint isWritable = false.
         keys: [
