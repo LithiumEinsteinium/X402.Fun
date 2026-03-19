@@ -39,3 +39,9 @@ coverage/
 tmp/
 temp/
 *.tmp
+
+# Rust/Anchor build artifacts
+target/
+
+# Anchor cache
+.anchor/

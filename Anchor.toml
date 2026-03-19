@@ -6,17 +6,17 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-x402_fun = "NEW_PROGRAM_ID"
+x402_fun = "ES8SmrSReeDZU5Zw3VzqyotUL6rSSwYkE2QT9C4mxmJT"
 
 [programs.mainnet]
-x402_fun = "NEW_PROGRAM_ID"
+x402_fun = "ES8SmrSReeDZU5Zw3VzqyotUL6rSSwYkE2QT9C4mxmJT"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "devnet"  # Switch to "mainnet" for mainnet deployment
-wallet = "~/.config/solana/id.json"
+cluster = "devnet"
+wallet = "home/dane/solana-wallet.json"
 
 [scripts]
 test = "npm test"

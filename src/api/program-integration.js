@@ -39,7 +39,7 @@ import {
 import bs58 from 'bs58';
 import crypto from 'crypto';
 
-const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || 'NEW_PROGRAM_ID');
+const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || 'ES8SmrSReeDZU5Zw3VzqyotUL6rSSwYkE2QT9C4mxmJT');
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
 const TOKEN_DECIMALS = 9;
 const GRADUATION_LAMPORTS = 1_500_000_000n; // 1.5 SOL devnet

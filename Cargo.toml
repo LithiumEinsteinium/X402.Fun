@@ -1,0 +1,7 @@
+[workspace]
+members = ["programs/x402-fun"]
+resolver = "2"
+
+[profile.release]
+overflow-checks = true
+opt-level = 3

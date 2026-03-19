@@ -29,7 +29,7 @@ use anchor_spl::token_interface::{
     TransferChecked, transfer_checked,
 };
 
-declare_id!("NEW_PROGRAM_ID");
+declare_id!("ES8SmrSReeDZU5Zw3VzqyotUL6rSSwYkE2QT9C4mxmJT");
 
 // PumpSwap AMM program. Pool PDA seeds: ["pool", index_le_bytes, creator, base_mint, quote_mint].
 // IDL: https://gist.github.com/Taylor123/dcd9f3285ca105efdcdf98089a2b3198

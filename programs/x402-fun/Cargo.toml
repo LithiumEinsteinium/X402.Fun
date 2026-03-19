@@ -5,7 +5,7 @@ description = "X402.Fun agent-only meme token launchpad"
 edition = "2021"
 
 [lib]
-crate-types = ["cdylib", "lib"]
+crate-type = ["cdylib", "lib"]
 name = "x402_fun"
 
 [features]
