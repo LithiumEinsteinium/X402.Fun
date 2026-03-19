@@ -33,13 +33,14 @@ import {
 } from '@solana/web3.js';
 import {
   getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountInstruction,
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
 import bs58 from 'bs58';
 import crypto from 'crypto';
 
-const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || 'ES8SmrSReeDZU5Zw3VzqyotUL6rSSwYkE2QT9C4mxmJT');
+const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || 'NEW_PROGRAM_ID');
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
 const TOKEN_DECIMALS = 9;
 const GRADUATION_LAMPORTS = 1_500_000_000n; // 1.5 SOL devnet
@@ -292,12 +293,28 @@ export async function createLaunchTransaction(req, res) {
     // Step 1: oracle submits receipt
     const { receiptPda, nonce } = await submitReceipt(creator);
 
+    // FIX-4: Derive vault ATA upfront — needed for both ATA init and response.
+    // The vault is the bonding curve PDA's token account (allowOwnerOffCurve = true).
+    const vaultAta = getAssociatedTokenAddressSync(mintPda, curvePda, true, TOKEN_PROGRAM_ID);
+
     const { blockhash } = await connection.getLatestBlockhash('confirmed');
     const tx = new Transaction({ feePayer: creator, recentBlockhash: blockhash });
 
     tx.add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
       ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5_000 }),
+      // FIX-4: Create vault ATA atomically in the launch transaction.
+      // LaunchToken in lib.rs does not init the vault ATA, but Buy expects it
+      // to exist (associated_token constraint, no init_if_needed).
+      // Creator pays ~0.002 SOL rent for this account.
+      createAssociatedTokenAccountInstruction(
+        creator,                    // payer
+        vaultAta,                   // ATA address (bonding_curve's token account)
+        curvePda,                   // ATA owner
+        mintPda,                    // mint
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      ),
       {
         // Account order from IDL:
         //   global, x402_receipt, token, bonding_curve, mint, creator,
@@ -328,6 +345,7 @@ export async function createLaunchTransaction(req, res) {
       success: true,
       mint: mintPda.toBase58(),
       bondingCurve: curvePda.toBase58(),
+      vaultTokenAccount: vaultAta.toBase58(),
       tokenState: tokenPda.toBase58(),
       receiptPda: receiptPda.toBase58(),
       nonce: nonce.toString('hex'),
