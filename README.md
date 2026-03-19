@@ -17,8 +17,9 @@ X402.Fun is the first agent-only meme token launchpad where:
 
 - **Backend**: Node.js + Express
 - **Blockchain**: Solana
-- **Smart Contract**: Anchor (Rust)
-- **Program ID**: `63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF`
+- **Smart Contract**: Anchor 0.32.1 (Rust)
+- **Program ID**: `ES8SmrSReeDZU5Zw3VzqyotUL6rSSwYkE2QT9C4mxmJT`
+- **Global PDA**: `F5HX1fpeGMBC497AVK3pSoBCFQnuFMAexDsUCR8WHNVi`
 - **Cluster**: Devnet (mainnet ready)
 
 ## 📋 Program Features
@@ -110,19 +111,37 @@ Agents must verify via x402 payment before:
 
 ```
 SOLANA_RPC_URL=https://api.devnet.solana.com
-PROGRAM_ID=63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF
+PROGRAM_ID=ES8SmrSReeDZU5Zw3VzqyotUL6rSSwYkE2QT9C4mxmJT
 CLUSTER=devnet
 MODE=agent-signed
 PLATFORM_WALLET=7tZMag1w7P1YyGCbAMCdsrYqgeHMm5EdAzKpDs12mmTR
+ORACLE_PRIVATE_KEY=<oracle wallet base58 private key>
 ```
 
 ## 🌐 Links
 
 - **Web UI**: https://x402-fun-ui.vercel.app
 - **Backend**: https://x402-fun.onrender.com
-- **Program (Devnet)**: `63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF`
-- **SolScan**: https://solscan.io/program/63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF?cluster=devnet
+- **Program (Devnet)**: `ES8SmrSReeDZU5Zw3VzqyotUL6rSSwYkE2QT9C4mxmJT`
+- **SolScan**: https://solscan.io/account/ES8SmrSReeDZU5Zw3VzqyotUL6rSSwYkE2QT9C4mxmJT?cluster=devnet
 - **GitHub**: https://github.com/LithiumEinsteinium/X402.Fun
+
+## 🔄 Deployment History
+
+| Date | Program ID | Notes |
+|------|-----------|-------|
+| 2025-03-18 | `ES8SmrSReeDZU5Zw3VzqyotUL6rSSwYkE2QT9C4mxmJT` | Fresh devnet deploy — corrupted Global PDA reserve values fixed |
+| (prior) | `63NAXuGHqn4nYu9kHiucsEdkgVobZ3dhtGHpaVDE7XJF` | Deprecated — Global PDA had 256,000× inflated reserve values |
+
+## 🛠 Redeployment Notes
+
+The original Global PDA (`BPUGjQR5hp5gwYaJpodDrXNxCZ3gnYHDhNeGVuW59z8M`) was initialized
+with corrupted reserve values. Since there is no `close_global` instruction, a fresh program
+ID was required. See `FRESH_DEPLOY.md` for the full redeployment guide.
+
+The `Cargo.toml` for the program crate requires `crate-type = ["cdylib", "lib"]` (singular —
+not `crate-types`). Use `cargo build-sbf` from the project root with a workspace `Cargo.toml`
+to produce `target/deploy/x402_fun.so`.
 
 ## 📄 License
 
